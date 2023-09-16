@@ -2,4 +2,5 @@ beautifulsoup4
 fastapi
 fastapi-cache2
 httpx[http2]
+tvdb_v4_official
 uvicorn
