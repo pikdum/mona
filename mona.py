@@ -109,7 +109,7 @@ async def get_show_fanart(show: str):
     if data and data.get("artworks"):
         random_item = random.choice(data["artworks"])
         return RedirectResponse(url=random_item["image"], status_code=302)
-    fallback = "https://files.catbox.moe/kvm4n0.jpg"
+    fallback = "https://raw.githubusercontent.com/pikdum/plugin.video.haru/master/fanart-greyscale.jpg"
     return RedirectResponse(url=fallback, status_code=302)
 
 
