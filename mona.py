@@ -11,10 +11,26 @@ from fastapi_cache import FastAPICache
 from fastapi_cache.backends.inmemory import InMemoryBackend
 from fastapi_cache.decorator import cache
 
-from util import slugify
-
 app = FastAPI()
 tvdb = tvdb_v4_official.TVDB(os.environ["TVDB_API_KEY"])
+
+
+def slugify(text: str) -> str:
+    # lowercase
+    text = text.lower()
+    # strip bbcode
+    text = re.sub(r"\[.*?\]", "", text)
+    # remove parens
+    text = text.replace("(", "").replace(")", "")
+    # remove apostrophes of all sorts
+    text = text.replace("'", "").replace("’", "")
+    # remove whatever this is
+    text = text.replace("+", "").replace("@", "")
+    # replace non-alphanumeric with dashes
+    text = re.sub(r"[^a-zA-Z0-9_]+", "-", text)
+    # strip leading and trailing dashes
+    text = text.strip("-")
+    return text
 
 
 @cache(expire=86400)
