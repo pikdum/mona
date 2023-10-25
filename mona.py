@@ -113,6 +113,14 @@ async def get_show_fanart(show: str):
     return RedirectResponse(url=fallback, status_code=302)
 
 
+@app.head("/healthcheck")
+async def healthcheck():
+    data = await tvdb_search("yuyushiki")
+    if not data:
+        raise HTTPException(status_code=500, detail="tvdb api error")
+    return
+
+
 @app.on_event("startup")
 async def startup():
     FastAPICache.init(InMemoryBackend())

@@ -20,3 +20,10 @@ primary_region = "ord"
   auto_start_machines = false
   min_machines_running = 1
   processes = ["app"]
+
+[[http_service.checks]]
+  grace_period = "5s"
+  interval = "5m"
+  method = "HEAD"
+  timeout = "5s"
+  path = "/healthcheck"
