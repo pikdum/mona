@@ -113,6 +113,7 @@ async def get_show_fanart(show: str):
     return RedirectResponse(url=fallback, status_code=302)
 
 
+@app.get("/healthcheck")
 @app.head("/healthcheck")
 async def healthcheck():
     data = await tvdb_search("yuyushiki")
