@@ -63,16 +63,23 @@ async def subsplease_search(name: str):
 
 @cache(expire=86400)
 async def tvdb_search(name: str):
+    original_name = name
     name = re.sub(r"S\d+$", "", name).strip()
     name = re.sub(r"\d+$", "", name).strip()
+    # escape parentheses: (2024) -> \(2024\)
+    name = re.sub(r"\(|\)", r"\\\g<0>", name).strip()
     data = tvdb.search(name)
     if data:
         selected_data = data[0]
         for item in data:
             if item.get("primary_language") == "jpn" and item.get("type") == "series":
                 selected_data = item
+                logger.info(
+                    f"{original_name} -> {name} -> {item['name']} ({item['tvdb_id']})"
+                )
                 break
         return selected_data
+    logger.info(f"{original_name} -> {name} -> Not Found")
     return None
 
 
