@@ -10,6 +10,7 @@ from fastapi.responses import RedirectResponse
 from fastapi_cache import FastAPICache
 from fastapi_cache.backends.inmemory import InMemoryBackend
 from fastapi_cache.decorator import cache
+from loguru import logger
 
 app = FastAPI()
 tvdb = tvdb_v4_official.TVDB(os.environ["TVDB_API_KEY"])
