@@ -63,6 +63,8 @@ async def subsplease_search(name: str):
 
 @cache(expire=86400)
 async def tvdb_search(name: str):
+    global tvdb
+    tvdb = tvdb_v4_official.TVDB(os.environ["TVDB_API_KEY"])
     original_name = name
     name = re.sub(r"S\d+$", "", name).strip()
     name = re.sub(r"\d+$", "", name).strip()
@@ -124,10 +126,7 @@ async def get_show_fanart(show: str):
 @app.get("/healthcheck")
 @app.head("/healthcheck")
 async def healthcheck():
-    data = await tvdb_search("yuyushiki")
-    if not data:
-        raise HTTPException(status_code=500, detail="tvdb api error")
-    return
+    return {"status": "ok"}
 
 
 @app.on_event("startup")
