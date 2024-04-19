@@ -1,6 +1,7 @@
 import os
 import random
 import re
+import threading
 
 import httpx
 import tvdb_v4_official
@@ -13,7 +14,19 @@ from fastapi_cache.decorator import cache
 from loguru import logger
 
 app = FastAPI()
-tvdb = tvdb_v4_official.TVDB(os.environ["TVDB_API_KEY"])
+tvdb = None
+
+
+# use threading.Timer to re-init tvdb every hour
+# to prevent token expiration after 30 days
+def init_tvdb():
+    global tvdb
+    tvdb = tvdb_v4_official.TVDB(os.environ["TVDB_API_KEY"])
+    logger.info("Refreshed TVDB Token")
+    threading.Timer(3600, init_tvdb).start()
+
+
+init_tvdb()
 
 
 def slugify(text: str) -> str:
@@ -63,8 +76,6 @@ async def subsplease_search(name: str):
 
 @cache(expire=86400)
 async def tvdb_search(name: str):
-    global tvdb
-    tvdb = tvdb_v4_official.TVDB(os.environ["TVDB_API_KEY"])
     original_name = name
     name = re.sub(r"S\d+$", "", name).strip()
     name = re.sub(r"\d+$", "", name).strip()
