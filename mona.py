@@ -48,6 +48,19 @@ def slugify(text: str) -> str:
 
 
 @cache(expire=86400)
+async def torrent_art(url):
+    async with httpx.AsyncClient(http2=True) as client:
+        response = await client.get(url, follow_redirects=True)
+        if response.status_code == 200:
+            soup = BeautifulSoup(response.text, "html.parser")
+            description = soup.find(id="torrent-description").text.strip()
+            pattern = r"https?://[^\s]+?\.(?:jpg|jpeg|png|gif)"
+            match = re.search(pattern, description)
+            return match.group(0) if match else None
+    return None
+
+
+@cache(expire=86400)
 async def subsplease_search(name: str):
     metadata = {}
     slug = slugify(name)
@@ -132,6 +145,17 @@ async def get_show_fanart(show: str):
         return RedirectResponse(url=random_item["image"], status_code=302)
     fallback = "https://raw.githubusercontent.com/pikdum/plugin.video.haru/master/fanart-greyscale.jpg"
     return RedirectResponse(url=fallback, status_code=302)
+
+
+@app.get("/torrent-art/")
+async def get_torrent_art(url: str = None):
+    if not url:
+        raise HTTPException(status_code=400, detail="url is required")
+    logger.info(f"torrent url: {url}")
+    image = await torrent_art(url)
+    if image:
+        return RedirectResponse(url=image, status_code=302)
+    raise HTTPException(status_code=404, detail="art not found")
 
 
 @app.get("/healthcheck")
