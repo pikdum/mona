@@ -3,6 +3,7 @@ import random
 import re
 import threading
 
+import anitopy
 import httpx
 import tvdb_v4_official
 from bs4 import BeautifulSoup
@@ -156,6 +157,27 @@ async def get_torrent_art(url: str = None):
     if image:
         return RedirectResponse(url=image, status_code=302)
     raise HTTPException(status_code=404, detail="art not found")
+
+
+@app.get("/poster/")
+async def get_file_poster(filename: str = None):
+    if not filename:
+        raise HTTPException(status_code=400, detail="filename is required")
+    show = anitopy.parse(filename)["anime_title"]
+    if not show:
+        raise HTTPException(status_code=404, detail="show not found")
+    return await get_show_poster(show)
+
+
+@app.get("/fanart/")
+async def get_file_fanart(filename: str = None):
+    logger.info(f"filename: {filename}")
+    if not filename:
+        raise HTTPException(status_code=400, detail="filename is required")
+    show = anitopy.parse(filename)["anime_title"]
+    if not show:
+        raise HTTPException(status_code=404, detail="show not found")
+    return await get_show_fanart(show)
 
 
 @app.get("/healthcheck")

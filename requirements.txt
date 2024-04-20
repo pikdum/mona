@@ -1,3 +1,4 @@
+anitopy
 beautifulsoup4
 fastapi
 fastapi-cache2
