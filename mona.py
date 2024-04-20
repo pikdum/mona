@@ -152,7 +152,6 @@ async def get_show_fanart(show: str):
 async def get_torrent_art(url: str = None):
     if not url:
         raise HTTPException(status_code=400, detail="url is required")
-    logger.info(f"torrent url: {url}")
     image = await torrent_art(url)
     if image:
         return RedirectResponse(url=image, status_code=302)
@@ -171,7 +170,6 @@ async def get_file_poster(filename: str = None):
 
 @app.get("/fanart/")
 async def get_file_fanart(filename: str = None):
-    logger.info(f"filename: {filename}")
     if not filename:
         raise HTTPException(status_code=400, detail="filename is required")
     show = anitopy.parse(filename)["anime_title"]
