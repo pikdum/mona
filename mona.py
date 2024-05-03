@@ -2,6 +2,7 @@ import os
 import random
 import re
 import threading
+from pprint import pprint
 
 import anitopy
 import httpx
@@ -88,6 +89,12 @@ async def subsplease_search(name: str):
         return metadata
 
 
+def priority_sort_key(obj):
+    lang_priority = 0 if obj.get("primary_language") == "jpn" else 1
+    type_priority = 0 if obj.get("type") == "series" else 1
+    return (lang_priority, type_priority)
+
+
 @cache(expire=86400)
 async def tvdb_search(name: str):
     original_name = name
@@ -97,15 +104,12 @@ async def tvdb_search(name: str):
     name = re.sub(r"\(|\)", r"\\\g<0>", name).strip()
     data = tvdb.search(name)
     if data:
-        selected_data = data[0]
-        for item in data:
-            if item.get("primary_language") == "jpn" and item.get("type") == "series":
-                selected_data = item
-                logger.info(
-                    f"{original_name} -> {name} -> {item['name']} ({item['tvdb_id']})"
-                )
-                break
-        return selected_data
+        selected = sorted(data, key=priority_sort_key)[0]
+        logger.info(
+            f"{original_name} -> {name} -> {selected['name']} ({selected['tvdb_id']})"
+        )
+        logger.debug(pprint(selected))
+        return selected
     logger.info(f"{original_name} -> {name} -> Not Found")
     return None
 
