@@ -1,7 +1,6 @@
 import os
 import random
 import re
-from pprint import pprint
 
 import anitopy
 import httpx
@@ -80,7 +79,7 @@ async def find_best_match(search_string: str) -> dict | None:
 
 
 @cache(expire=86400)
-async def get_poster(parsed: dict) -> str | None:
+async def get_tvdb_poster(parsed: dict) -> str | None:
     search_string = get_search_string(parsed)
     series = await find_best_match(search_string)
     if not series:
@@ -93,30 +92,20 @@ async def get_poster(parsed: dict) -> str | None:
 
 
 @cache(expire=86400)
-async def subsplease_search(name: str) -> dict:
-    metadata = {}
-    slug = slugify(name)
-    words = slug.split("-")
-
+async def get_subsplease_poster(name: str) -> str | None:
+    logger.info(f"Searching for: {name}")
+    words = slugify(name).split("-")
     async with httpx.AsyncClient(http2=True) as client:
         for _ in range(len(words) + 1):
             url = f"https://subsplease.org/shows/{'-'.join(words)}"
             response = await client.get(url, follow_redirects=True)
-
             if response.status_code == 200:
                 soup = BeautifulSoup(response.text, "lxml")
-
-                try:
-                    img_src = soup.find("img")["src"]
-                    metadata["image"] = f"https://subsplease.org{img_src}"
-                except:
-                    pass
-
-                return metadata
-
+                img = soup.find("img")
+                if img:
+                    return f"https://subsplease.org{img['src']}"
             words = words[:-1]
-
-        return metadata
+    return None
 
 
 @app.get("/poster/")
@@ -125,10 +114,10 @@ async def poster(filename: str = None):
     if not filename:
         raise HTTPException(status_code=400, detail="filename is required")
     parsed = anitopy.parse(filename)
-    poster = await get_poster(parsed)
+    poster = await get_tvdb_poster(parsed)
     if poster:
         return RedirectResponse(url=poster, status_code=302)
-    poster = (await subsplease_search(parsed.get("anime_title"))).get("image")
+    poster = await get_subsplease_poster(parsed.get("anime_title"))
     if poster:
         return RedirectResponse(url=poster, status_code=302)
     return HTTPException(status_code=404, detail="poster not found")
