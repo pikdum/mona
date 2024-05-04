@@ -162,11 +162,20 @@ async def get_torrent_art(url: str = None):
     raise HTTPException(status_code=404, detail="art not found")
 
 
+def get_show_from_filename(filename: str):
+    parsed = anitopy.parse(filename)
+    title = parsed.get("anime_title", None)
+    year = parsed.get("anime_year", None)
+    show = f"{title} ({year})" if title and year else title
+    logger.info(f"Filename: {filename} -> {show}")
+    return show
+
+
 @app.get("/poster/")
 async def get_file_poster(filename: str = None):
     if not filename:
         raise HTTPException(status_code=400, detail="filename is required")
-    show = anitopy.parse(filename)["anime_title"]
+    show = get_show_from_filename(filename)
     if not show:
         raise HTTPException(status_code=404, detail="show not found")
     return await get_show_poster(show)
@@ -176,7 +185,7 @@ async def get_file_poster(filename: str = None):
 async def get_file_fanart(filename: str = None):
     if not filename:
         raise HTTPException(status_code=400, detail="filename is required")
-    show = anitopy.parse(filename)["anime_title"]
+    show = get_show_from_filename(filename)
     if not show:
         raise HTTPException(status_code=404, detail="show not found")
     return await get_show_fanart(show)
