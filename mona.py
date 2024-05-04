@@ -117,12 +117,13 @@ async def get_subsplease_poster(name: str) -> str | None:
 
 @app.get("/poster/")
 @app.get("/poster/show/{filename}")
-async def poster(filename: str | None = None):
-    if not filename:
-        raise HTTPException(status_code=400, detail="filename is required")
-    parsed = anitopy.parse(filename)
+async def poster(filename: str | None = None, query: str | None = None):
+    if not filename and not query:
+        raise HTTPException(status_code=400, detail="query is required")
+    query = filename or query or ""
+    parsed = anitopy.parse(query)
     if not parsed or not (title := parsed.get("anime_title")):
-        raise HTTPException(status_code=400, detail="filename is invalid")
+        raise HTTPException(status_code=400, detail="query is invalid")
     poster = await get_tvdb_poster(parsed)
     if poster:
         return RedirectResponse(url=poster, status_code=302)
@@ -159,10 +160,11 @@ async def get_fanart(parsed: dict[str, str]) -> list[dict] | None:
 
 @app.get("/fanart/")
 @app.get("/fanart/show/{filename}")
-async def fanart(filename: str | None = None):
-    if not filename:
-        raise HTTPException(status_code=400, detail="filename is required")
-    fanart = await get_fanart(anitopy.parse(filename))
+async def fanart(filename: str | None = None, query: str | None = None):
+    if not filename and not query:
+        raise HTTPException(status_code=400, detail="query is required")
+    query = filename or query or ""
+    fanart = await get_fanart(anitopy.parse(query))
     if not fanart or not (image := random.choice(fanart).get("image")):
         return HTTPException(status_code=404, detail="fanart not found")
     return RedirectResponse(url=image, status_code=302)
