@@ -15,7 +15,7 @@ from lxml import html
 
 from tvdb import TVDB
 
-app = FastAPI()
+app = FastAPI(docs_url="/", redoc_url=None)
 
 tvdb = TVDB(os.environ["TVDB_API_KEY"])
 
