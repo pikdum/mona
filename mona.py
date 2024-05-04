@@ -11,6 +11,7 @@ from fastapi_cache import FastAPICache
 from fastapi_cache.backends.inmemory import InMemoryBackend
 from fastapi_cache.decorator import cache
 from loguru import logger
+from lxml import html
 
 from tvdb import TVDB
 
@@ -37,10 +38,9 @@ def slugify(text: str) -> str:
     return text
 
 
-def get_search_string(parsed: dict) -> str | None:
-    if not parsed.get("anime_title"):
+def get_search_string(parsed: dict[str, str]) -> str | None:
+    if not (search_string := parsed.get("anime_title")):
         return None
-    search_string = parsed.get("anime_title")
     if parsed.get("anime_year"):
         search_string += f" ({parsed.get('anime_year')})"
     return search_string
@@ -49,13 +49,18 @@ def get_search_string(parsed: dict) -> str | None:
 async def get_season_image(tvdb_id: int, season_number: str) -> str | None:
     if not season_number or not tvdb_id:
         return None
-    seasons = (await tvdb.get_series_extended(tvdb_id)).get("seasons", [])
+    series = await tvdb.get_series_extended(tvdb_id)
+    if not series:
+        return None
+    seasons = series.get("seasons", [])
     season = next(
         (x for x in seasons if x.get("number") == int(season_number)),
         None,
     )
-    if season.get("id"):
+    if season:
         season_details = await tvdb.get_season_extended(season.get("id"))
+        if not season_details:
+            return None
         artwork = season_details.get("artwork", [])
         season_image = next((x for x in artwork if x.get("type") == 7), {}).get("image")
         return season_image
@@ -79,15 +84,19 @@ async def find_best_match(search_string: str) -> dict | None:
 
 
 @cache(expire=86400)
-async def get_tvdb_poster(parsed: dict) -> str | None:
+async def get_tvdb_poster(parsed: dict[str, str]) -> str | None:
     search_string = get_search_string(parsed)
+    if not search_string:
+        return None
     series = await find_best_match(search_string)
     if not series:
         return None
     series_image = series.get("image_url")
-    season_image = await get_season_image(
-        series.get("tvdb_id"), parsed.get("anime_season")
-    )
+    if not (series_id := series.get("tvdb_id")) or not (
+        season := parsed.get("anime_season")
+    ):
+        return series_image
+    season_image = await get_season_image(series_id, season)
     return season_image or series_image
 
 
@@ -100,41 +109,49 @@ async def get_subsplease_poster(name: str) -> str | None:
             url = f"https://subsplease.org/shows/{'-'.join(words)}"
             response = await client.get(url, follow_redirects=True)
             if response.status_code == 200:
-                soup = BeautifulSoup(response.text, "lxml")
-                img = soup.find("img")
-                if img:
-                    return f"https://subsplease.org{img['src']}"
+                img_src = html.fromstring(response.text).xpath("//img/@src")
+                if img_src:
+                    return f"https://subsplease.org{img_src[0]}"
             words = words[:-1]
     return None
 
 
 @app.get("/poster/")
 @app.get("/poster/show/{filename}")
-async def poster(filename: str = None):
+async def poster(filename: str | None = None):
     if not filename:
         raise HTTPException(status_code=400, detail="filename is required")
     parsed = anitopy.parse(filename)
+    if not parsed or not (title := parsed.get("anime_title")):
+        raise HTTPException(status_code=400, detail="filename is invalid")
     poster = await get_tvdb_poster(parsed)
     if poster:
         return RedirectResponse(url=poster, status_code=302)
-    poster = await get_subsplease_poster(parsed.get("anime_title"))
+    poster = await get_subsplease_poster(title)
     if poster:
         return RedirectResponse(url=poster, status_code=302)
     return HTTPException(status_code=404, detail="poster not found")
 
 
 @cache(expire=86400)
-async def get_fanart(parsed: dict) -> list[str] | None:
+async def get_fanart(parsed: dict[str, str]) -> list[dict] | None:
     search_string = get_search_string(parsed)
-    series = await find_best_match(search_string)
-    if not series:
+    if not search_string:
         return None
-    if series.get("type") == "series":
-        artworks = await tvdb.get_series_artworks(series.get("tvdb_id"), type=3)
+    series = await find_best_match(search_string)
+    if (
+        not series
+        or not (series_id := series.get("tvdb_id"))
+        or not (series_type := series.get("type"))
+    ):
+        return None
+    if series_type == "series":
+        artworks = await tvdb.get_series_artworks(series_id, type=3)
         return artworks.get("artworks") if artworks else None
-    elif series.get("type") == "movie":
-        movie = await tvdb.get_movie_extended(series.get("tvdb_id"))
-        artworks = movie.get("artworks") if movie else []
+    elif series_type == "movie":
+        movie = await tvdb.get_movie_extended(series_id)
+        if not movie or not (artworks := movie.get("artworks")):
+            return None
         filtered = list(filter(lambda x: x.get("type") == 15, artworks))
         return filtered if filtered else None
     else:
@@ -143,31 +160,36 @@ async def get_fanart(parsed: dict) -> list[str] | None:
 
 @app.get("/fanart/")
 @app.get("/fanart/show/{filename}")
-async def fanart(filename: str = None):
+async def fanart(filename: str | None = None):
     if not filename:
         raise HTTPException(status_code=400, detail="filename is required")
     fanart = await get_fanart(anitopy.parse(filename))
     if not fanart:
         return HTTPException(status_code=404, detail="fanart not found")
     random_art = random.choice(fanart)
-    return RedirectResponse(url=random_art["image"], status_code=302)
+    if not random_art or not (image := random_art.get("image")):
+        return HTTPException(status_code=404, detail="fanart not found")
+    return RedirectResponse(url=image, status_code=302)
 
 
 @cache(expire=86400)
-async def get_torrent_art(url):
+async def get_torrent_art(url: str):
     async with httpx.AsyncClient(http2=True) as client:
         response = await client.get(url, follow_redirects=True)
         if response.status_code == 200:
             soup = BeautifulSoup(response.text, "lxml")
-            description = soup.find(id="torrent-description").text.strip()
+            description = soup.find(id="torrent-description")
+            if not description:
+                return None
+            description_text = description.text.strip()
             pattern = r"https?://[^\s]+?\.(?:jpg|jpeg|png|gif)"
-            match = re.search(pattern, description)
+            match = re.search(pattern, description_text)
             return match.group(0) if match else None
     return None
 
 
 @app.get("/torrent-art/")
-async def torrent_art(url: str = None):
+async def torrent_art(url: str | None = None):
     if not url:
         raise HTTPException(status_code=400, detail="url is required")
     image = await get_torrent_art(url)
