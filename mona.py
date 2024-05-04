@@ -1,7 +1,7 @@
+import asyncio
 import os
 import random
 import re
-import threading
 from pprint import pprint
 
 import anitopy
@@ -21,12 +21,12 @@ app = FastAPI()
 tvdb = TVDB(os.environ["TVDB_API_KEY"])
 
 
-# use threading.Timer to re-init tvdb every hour
+# use call_later to re-auth tvdb every hour
 # to prevent token expiration after 30 days
 async def login_tvdb():
     await tvdb.login()
     logger.info("Refreshed TVDB Token")
-    threading.Timer(3600, login_tvdb).start()
+    asyncio.get_event_loop().call_later(3600, lambda: asyncio.create_task(login_tvdb()))
 
 
 def slugify(text: str) -> str:
