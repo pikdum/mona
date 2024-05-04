@@ -118,12 +118,7 @@ async def get_subsplease_poster(name: str) -> str | None:
 
 
 @app.get("/poster")
-@app.get("/poster/")
-@app.get("/poster/show/{filename}")
-async def poster(filename: str | None = None, query: str | None = None):
-    if not filename and not query:
-        raise HTTPException(status_code=400, detail="query is required")
-    query = filename or query or ""
+async def poster(query: str):
     parsed = anitopy.parse(query)
     if not parsed or not (title := parsed.get("anime_title")):
         raise HTTPException(status_code=400, detail="query is invalid")
@@ -162,12 +157,7 @@ async def get_fanart(parsed: dict[str, str]) -> list[dict] | None:
 
 
 @app.get("/fanart")
-@app.get("/fanart/")
-@app.get("/fanart/show/{filename}")
-async def fanart(filename: str | None = None, query: str | None = None):
-    if not filename and not query:
-        raise HTTPException(status_code=400, detail="query is required")
-    query = filename or query or ""
+async def fanart(query: str):
     fanart = await get_fanart(anitopy.parse(query))
     if not fanart or not (image := random.choice(fanart).get("image")):
         return HTTPException(status_code=404, detail="fanart not found")
@@ -191,10 +181,9 @@ async def get_torrent_art(url: str):
 
 
 @app.get("/torrent-art")
-@app.get("/torrent-art/")
-async def torrent_art(url: str | None = None):
-    if not url:
-        raise HTTPException(status_code=400, detail="url is required")
+async def torrent_art(url: str):
+    if not url.startswith(("https://nyaa.si", "https://sukebei.nyaa.si/")):
+        raise HTTPException(status_code=400, detail="invalid url")
     image = await get_torrent_art(url)
     if image:
         return RedirectResponse(url=image, status_code=302)
