@@ -201,7 +201,7 @@ async def find_best_match(search_string: str):
 async def get_season_image(tvdb_id: int, season_number: str):
     if not season_number or not tvdb_id:
         return None
-    seasons = await tvdb.get_series_extended(tvdb_id).get("seasons", [])
+    seasons = (await tvdb.get_series_extended(tvdb_id)).get("seasons", [])
     season = next(
         (x for x in seasons if x.get("number") == int(season_number)),
         None,

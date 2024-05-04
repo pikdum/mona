@@ -72,6 +72,16 @@ class TVDB:
                 return response.json().get("data")
         return None
 
+    async def get_season_extended(self, season_id: int) -> dict | None:
+        async with httpx.AsyncClient(http2=True) as client:
+            response = await client.get(
+                f"{self.api_base}/seasons/{season_id}/extended",
+                headers={"Authorization": f"Bearer {self.token}"},
+            )
+            if response.status_code == 200:
+                return response.json().get("data")
+        return None
+
 
 async def main():
     tvdb = TVDB(os.environ["TVDB_API_KEY"])
