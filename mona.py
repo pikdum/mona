@@ -117,6 +117,7 @@ async def get_subsplease_poster(name: str) -> str | None:
     return None
 
 
+@app.get("/poster")
 @app.get("/poster/")
 @app.get("/poster/show/{filename}")
 async def poster(filename: str | None = None, query: str | None = None):
@@ -160,6 +161,7 @@ async def get_fanart(parsed: dict[str, str]) -> list[dict] | None:
         return None
 
 
+@app.get("/fanart")
 @app.get("/fanart/")
 @app.get("/fanart/show/{filename}")
 async def fanart(filename: str | None = None, query: str | None = None):
@@ -188,6 +190,7 @@ async def get_torrent_art(url: str):
     return None
 
 
+@app.get("/torrent-art")
 @app.get("/torrent-art/")
 async def torrent_art(url: str | None = None):
     if not url:
