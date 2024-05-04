@@ -1,1 +1,1 @@
-web: uvicorn mona:app
+web: uvicorn mona.app:app

@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import os
 import random
 import re
@@ -12,7 +13,7 @@ from fastapi_cache.decorator import cache
 from loguru import logger
 from lxml import html
 
-from tvdb import TVDB
+from .tvdb import TVDB
 
 app = FastAPI(docs_url="/", redoc_url=None)
 
@@ -119,8 +120,7 @@ async def get_subsplease_poster(name: str) -> str | None:
 
 @app.get("/poster")
 async def poster(query: str):
-    parsed = anitopy.parse(query)
-    if not parsed or not (title := parsed.get("anime_title")):
+    if not (parsed := anitopy.parse(query)) or not (title := parsed.get("anime_title")):
         raise HTTPException(status_code=400, detail="query is invalid")
     poster = await get_tvdb_poster(parsed)
     if poster:
@@ -158,7 +158,9 @@ async def get_fanart(parsed: dict[str, str]) -> list[dict] | None:
 
 @app.get("/fanart")
 async def fanart(query: str):
-    fanart = await get_fanart(anitopy.parse(query))
+    if not (parsed := anitopy.parse(query)) or not (title := parsed.get("anime_title")):
+        raise HTTPException(status_code=400, detail="query is invalid")
+    fanart = await get_fanart(title)
     if not fanart or not (image := random.choice(fanart).get("image")):
         return HTTPException(status_code=404, detail="fanart not found")
     return RedirectResponse(url=image, status_code=302)
