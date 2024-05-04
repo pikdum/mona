@@ -2,7 +2,6 @@ import os
 import random
 import re
 import threading
-from pprint import pprint
 
 import anitopy
 import httpx
@@ -108,7 +107,6 @@ async def tvdb_search(name: str):
         logger.info(
             f"{original_name} -> {name} -> {selected['name']} ({selected['tvdb_id']})"
         )
-        logger.debug(pprint(selected))
         return selected
     logger.info(f"{original_name} -> {name} -> Not Found")
     return None
