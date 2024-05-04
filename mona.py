@@ -6,7 +6,6 @@ from pprint import pprint
 
 import anitopy
 import httpx
-import tvdb_v4_official
 from bs4 import BeautifulSoup
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import RedirectResponse
@@ -15,20 +14,19 @@ from fastapi_cache.backends.inmemory import InMemoryBackend
 from fastapi_cache.decorator import cache
 from loguru import logger
 
+from tvdb import TVDB
+
 app = FastAPI()
-tvdb = None
+
+tvdb = TVDB(os.environ["TVDB_API_KEY"])
 
 
 # use threading.Timer to re-init tvdb every hour
 # to prevent token expiration after 30 days
-def init_tvdb():
-    global tvdb
-    tvdb = tvdb_v4_official.TVDB(os.environ["TVDB_API_KEY"])
+async def login_tvdb():
+    await tvdb.login()
     logger.info("Refreshed TVDB Token")
-    threading.Timer(3600, init_tvdb).start()
-
-
-init_tvdb()
+    threading.Timer(3600, login_tvdb).start()
 
 
 def slugify(text: str) -> str:
@@ -102,7 +100,7 @@ async def tvdb_search(name: str):
     name = re.sub(r"\d+$", "", name).strip()
     # escape parentheses: (2024) -> \(2024\)
     name = re.sub(r"\(|\)", r"\\\g<0>", name).strip()
-    data = tvdb.search(name)
+    data = await tvdb.search(name)
     if data:
         selected = sorted(data, key=priority_sort_key)[0]
         logger.info(
@@ -119,9 +117,9 @@ async def tvdb_artworks(name: str, series_type: int, movie_type: int):
     if data:
         tvdb_id = data["tvdb_id"]
         if data.get("type") == "series":
-            return tvdb.get_series_artworks(tvdb_id, lang=None, type=series_type)
+            return await tvdb.get_series_artworks(tvdb_id, lang=None, type=series_type)
         elif data.get("type") == "movie":
-            movie = tvdb.get_movie_extended(tvdb_id)
+            movie = await tvdb.get_movie_extended(tvdb_id)
             if movie and movie.get("artworks"):
                 artworks = movie["artworks"]
                 filtered = list(filter(lambda x: x["type"] == movie_type, artworks))
@@ -192,24 +190,24 @@ def get_search_string(parsed: dict):
     return search_string
 
 
-def find_best_match(search_string: str):
-    results = tvdb.search(search_string)
+async def find_best_match(search_string: str):
+    results = await tvdb.search(search_string)
     if not results:
         return None
     selected = sorted(results, key=priority_sort_key)[0]
     return selected
 
 
-def get_season_image(tvdb_id: int, season_number: str):
+async def get_season_image(tvdb_id: int, season_number: str):
     if not season_number or not tvdb_id:
         return None
-    seasons = tvdb.get_series_extended(tvdb_id).get("seasons", [])
+    seasons = await tvdb.get_series_extended(tvdb_id).get("seasons", [])
     season = next(
         (x for x in seasons if x.get("number") == int(season_number)),
         None,
     )
     if season.get("id"):
-        season_details = tvdb.get_season_extended(season.get("id"))
+        season_details = await tvdb.get_season_extended(season.get("id"))
         artwork = season_details.get("artwork", [])
         season_image = next((x for x in artwork if x.get("type") == 7), {}).get("image")
         return season_image
@@ -220,24 +218,14 @@ def get_season_image(tvdb_id: int, season_number: str):
 async def get_poster(filename: str):
     parsed = anitopy.parse(filename)
     search_string = get_search_string(parsed)
-    series = find_best_match(search_string)
+    series = await find_best_match(search_string)
     if not series:
         return None
     series_image = series.get("image_url")
-    season_image = get_season_image(series.get("tvdb_id"), parsed.get("anime_season"))
+    season_image = await get_season_image(
+        series.get("tvdb_id"), parsed.get("anime_season")
+    )
     return season_image or series_image
-
-
-# @app.get("/test")
-# async def test():
-#     posters = [
-#         {
-#             "show": show,
-#             "poster": get_poster(show),
-#         }
-#         for show in ["Mushoku Tensei S1", "Mushoku Tensei S2", "Mushoku Tensei"]
-#     ]
-#     return posters
 
 
 @app.get("/fanart/")
@@ -258,4 +246,5 @@ async def healthcheck():
 
 @app.on_event("startup")
 async def startup():
+    await login_tvdb()
     FastAPICache.init(InMemoryBackend())

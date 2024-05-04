@@ -4,5 +4,4 @@ fastapi
 fastapi-cache2
 httpx[http2]
 loguru
-tvdb_v4_official
 uvicorn
