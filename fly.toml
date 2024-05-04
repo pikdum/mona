@@ -22,8 +22,8 @@ primary_region = "ord"
   processes = ["app"]
 
 [[http_service.checks]]
-  grace_period = "5s"
-  interval = "1m"
+  grace_period = "2s"
+  interval = "15s"
   method = "HEAD"
-  timeout = "5s"
+  timeout = "2s"
   path = "/healthcheck"
