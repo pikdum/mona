@@ -46,9 +46,12 @@ def get_search_string(parsed: dict[str, str]) -> str | None:
     return search_string
 
 
-async def get_season_image(tvdb_id: int, season_number: str) -> str | None:
+async def get_season_image(tvdb_id: int, season_number: str | list[str]) -> str | None:
     if not season_number or not tvdb_id:
         return None
+    season_number = (
+        season_number if isinstance(season_number, str) else season_number[0]
+    )
     series = await tvdb.get_series_extended(tvdb_id)
     if not series or not (seasons := series.get("seasons")):
         return None
