@@ -50,9 +50,8 @@ async def get_season_image(tvdb_id: int, season_number: str) -> str | None:
     if not season_number or not tvdb_id:
         return None
     series = await tvdb.get_series_extended(tvdb_id)
-    if not series:
+    if not series or not (seasons := series.get("seasons")):
         return None
-    seasons = series.get("seasons", [])
     season = next(
         (x for x in seasons if x.get("number") == int(season_number)),
         None,
@@ -164,10 +163,7 @@ async def fanart(filename: str | None = None):
     if not filename:
         raise HTTPException(status_code=400, detail="filename is required")
     fanart = await get_fanart(anitopy.parse(filename))
-    if not fanart:
-        return HTTPException(status_code=404, detail="fanart not found")
-    random_art = random.choice(fanart)
-    if not random_art or not (image := random_art.get("image")):
+    if not fanart or not (image := random.choice(fanart).get("image")):
         return HTTPException(status_code=404, detail="fanart not found")
     return RedirectResponse(url=image, status_code=302)
 
