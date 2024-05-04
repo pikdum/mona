@@ -128,7 +128,7 @@ async def poster(query: str):
     poster = await get_subsplease_poster(title)
     if poster:
         return RedirectResponse(url=poster, status_code=302)
-    return HTTPException(status_code=404, detail="poster not found")
+    raise HTTPException(status_code=404, detail="poster not found")
 
 
 @cache(expire=86400)
@@ -162,7 +162,7 @@ async def fanart(query: str):
         raise HTTPException(status_code=400, detail="query is invalid")
     fanart = await get_fanart(parsed)
     if not fanart or not (image := random.choice(fanart).get("image")):
-        return HTTPException(status_code=404, detail="fanart not found")
+        raise HTTPException(status_code=404, detail="fanart not found")
     return RedirectResponse(url=image, status_code=302)
 
 
