@@ -2,6 +2,7 @@ import os
 import random
 import re
 import threading
+from pprint import pprint
 
 import anitopy
 import httpx
@@ -143,6 +144,7 @@ async def get_show_poster(show: str):
 @app.get("/fanart/show/{show}")
 async def get_show_fanart(show: str):
     data = await tvdb_artworks(show, 3, 15)
+    logger.info(pprint(data))
     if data and data.get("artworks"):
         random_item = random.choice(data["artworks"])
         return RedirectResponse(url=random_item["image"], status_code=302)
@@ -162,6 +164,7 @@ async def get_torrent_art(url: str = None):
 
 def get_show_from_filename(filename: str):
     parsed = anitopy.parse(filename)
+    logger.info(pprint(parsed))
     title = parsed.get("anime_title", None)
     year = parsed.get("anime_year", None)
     show = f"{title} ({year})" if title and year else title
@@ -173,10 +176,68 @@ def get_show_from_filename(filename: str):
 async def get_file_poster(filename: str = None):
     if not filename:
         raise HTTPException(status_code=400, detail="filename is required")
+    poster = await get_poster(filename)
+    if poster:
+        return RedirectResponse(url=poster, status_code=302)
     show = get_show_from_filename(filename)
-    if not show:
-        raise HTTPException(status_code=404, detail="show not found")
     return await get_show_poster(show)
+
+
+def get_search_string(parsed: dict):
+    if not parsed.get("anime_title"):
+        return None
+    search_string = parsed.get("anime_title")
+    if parsed.get("anime_year"):
+        search_string += f" ({parsed.get('anime_year')})"
+    return search_string
+
+
+def find_best_match(search_string: str):
+    results = tvdb.search(search_string)
+    if not results:
+        return None
+    selected = sorted(results, key=priority_sort_key)[0]
+    return selected
+
+
+def get_season_image(tvdb_id: int, season_number: str):
+    if not season_number or not tvdb_id:
+        return None
+    seasons = tvdb.get_series_extended(tvdb_id).get("seasons", [])
+    season = next(
+        (x for x in seasons if x.get("number") == int(season_number)),
+        None,
+    )
+    if season.get("id"):
+        season_details = tvdb.get_season_extended(season.get("id"))
+        artwork = season_details.get("artwork", [])
+        season_image = next((x for x in artwork if x.get("type") == 7), {}).get("image")
+        return season_image
+    return None
+
+
+@cache(expire=86400)
+async def get_poster(filename: str):
+    parsed = anitopy.parse(filename)
+    search_string = get_search_string(parsed)
+    series = find_best_match(search_string)
+    if not series:
+        return None
+    series_image = series.get("image_url")
+    season_image = get_season_image(series.get("tvdb_id"), parsed.get("anime_season"))
+    return season_image or series_image
+
+
+# @app.get("/test")
+# async def test():
+#     posters = [
+#         {
+#             "show": show,
+#             "poster": get_poster(show),
+#         }
+#         for show in ["Mushoku Tensei S1", "Mushoku Tensei S2", "Mushoku Tensei"]
+#     ]
+#     return posters
 
 
 @app.get("/fanart/")
