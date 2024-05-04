@@ -158,9 +158,9 @@ async def get_fanart(parsed: dict[str, str]) -> list[dict] | None:
 
 @app.get("/fanart")
 async def fanart(query: str):
-    if not (parsed := anitopy.parse(query)) or not (title := parsed.get("anime_title")):
+    if not (parsed := anitopy.parse(query)):
         raise HTTPException(status_code=400, detail="query is invalid")
-    fanart = await get_fanart(title)
+    fanart = await get_fanart(parsed)
     if not fanart or not (image := random.choice(fanart).get("image")):
         return HTTPException(status_code=404, detail="fanart not found")
     return RedirectResponse(url=image, status_code=302)
