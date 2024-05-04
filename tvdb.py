@@ -3,6 +3,7 @@ import asyncio
 import os
 
 import httpx
+from loguru import logger
 
 
 class TVDB:
@@ -13,6 +14,10 @@ class TVDB:
         self.api_base: str = "https://api4.thetvdb.com/v4"
 
     async def login(self) -> str | None:
+        # refresh token every hour
+        asyncio.get_event_loop().call_later(
+            3600, lambda: asyncio.create_task(self.login())
+        )
         async with httpx.AsyncClient(http2=True) as client:
             response = await client.post(
                 f"{self.api_base}/login",
@@ -20,7 +25,9 @@ class TVDB:
             )
             if response.status_code == 200:
                 self.token = response.json().get("data", {}).get("token")
-                return self.token
+                logger.info("TVDB token refreshed!")
+            else:
+                logger.error("TVDB token refresh failed!")
         return self.token
 
     async def search(self, query: str) -> list[dict]:
