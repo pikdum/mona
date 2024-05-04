@@ -1,5 +1,4 @@
 anitopy
-beautifulsoup4
 fastapi
 fastapi-cache2
 httpx[http2]

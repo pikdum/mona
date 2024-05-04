@@ -4,7 +4,6 @@ import re
 
 import anitopy
 import httpx
-from bs4 import BeautifulSoup
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import RedirectResponse
 from fastapi_cache import FastAPICache
@@ -178,13 +177,13 @@ async def get_torrent_art(url: str):
     async with httpx.AsyncClient(http2=True) as client:
         response = await client.get(url, follow_redirects=True)
         if response.status_code == 200:
-            soup = BeautifulSoup(response.text, "lxml")
-            description = soup.find(id="torrent-description")
+            description = html.fromstring(response.text).xpath(
+                "string(//div[@id='torrent-description'])"
+            )
             if not description:
                 return None
-            description_text = description.text.strip()
             pattern = r"https?://[^\s]+?\.(?:jpg|jpeg|png|gif)"
-            match = re.search(pattern, description_text)
+            match = re.search(pattern, description)
             return match.group(0) if match else None
     return None
 
