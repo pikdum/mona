@@ -2,6 +2,7 @@
 import os
 import random
 import re
+from contextlib import asynccontextmanager
 
 import anitopy
 import httpx
@@ -13,9 +14,17 @@ from fastapi_cache.decorator import cache
 from loguru import logger
 from lxml import html
 
-from .tvdb import TVDB
+from mona.tvdb import TVDB
 
-app = FastAPI(docs_url="/", redoc_url=None)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    FastAPICache.init(InMemoryBackend())
+    await tvdb.login()
+    yield
+
+
+app = FastAPI(docs_url="/", redoc_url=None, lifespan=lifespan)
 
 tvdb = TVDB(os.environ["TVDB_API_KEY"])
 
@@ -196,9 +205,3 @@ async def torrent_art(url: str):
 @app.head("/healthcheck")
 async def healthcheck():
     return {"status": "ok"}
-
-
-@app.on_event("startup")
-async def startup():
-    await tvdb.login()
-    FastAPICache.init(InMemoryBackend())
