@@ -1,1 +1,5 @@
 fly.toml
+
+.git
+.venv
+.ruff_cache

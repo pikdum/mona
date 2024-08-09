@@ -6,23 +6,12 @@
 app = "wild-fire-3987"
 primary_region = "ord"
 
-[build]
-  builder = "paketobuildpacks/builder-jammy-base:latest"
-
-[build.args]
-  BP_CPYTHON_VERSION = "3.12"
-
-[env]
-  UVICORN_PORT = "8080"
-  UVICORN_HOST = "0.0.0.0"
-
 [http_service]
   internal_port = 8080
   force_https = true
   auto_stop_machines = false
   auto_start_machines = false
   min_machines_running = 1
-  processes = ["app"]
 
 [[http_service.checks]]
   grace_period = "2s"
