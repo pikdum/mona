@@ -1,9 +1,5 @@
-# fly.toml app configuration file generated for wild-fire-3987 on 2023-09-13T04:16:53-05:00
-#
-# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
-#
-
-app = "wild-fire-3987"
+# https://fly.io/docs/reference/configuration/
+app = "mona"
 primary_region = "ord"
 
 [http_service]

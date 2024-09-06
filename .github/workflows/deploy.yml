@@ -10,7 +10,7 @@ jobs:
     concurrency: deploy-group
     environment:
       name: production
-      url: https://wild-fire-3987.fly.dev
+      url: https://mona.fly.dev
     steps:
       - uses: actions/checkout@v4
       - uses: superfly/flyctl-actions/setup-flyctl@master
