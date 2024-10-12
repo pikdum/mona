@@ -3,10 +3,11 @@ import os
 import random
 import re
 from contextlib import asynccontextmanager
+from datetime import datetime
 
 import anitopy
 import httpx
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from fastapi_cache import FastAPICache
 from fastapi_cache.backends.inmemory import InMemoryBackend
@@ -20,13 +21,22 @@ from mona.tvdb import TVDB
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     FastAPICache.init(InMemoryBackend())
-    await tvdb.login()
     yield
 
 
 app = FastAPI(docs_url="/", redoc_url=None, lifespan=lifespan)
 
 tvdb = TVDB(os.environ["TVDB_API_KEY"])
+
+
+@app.middleware("http")
+async def tvdb_login(request: Request, call_next):
+    if tvdb.token is None:
+        await tvdb.login()
+    elif datetime.now().timestamp() > tvdb.token_expires:
+        await tvdb.login()
+    response = await call_next(request)
+    return response
 
 
 def slugify(text: str) -> str:

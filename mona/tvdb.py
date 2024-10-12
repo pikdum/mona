@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import asyncio
 import os
+from datetime import datetime
 
 import httpx
 from loguru import logger
@@ -9,15 +10,12 @@ from loguru import logger
 class TVDB:
     def __init__(self, apikey: str, pin: str = "hello world"):
         self.token: str | None = None
+        self.token_expires: int | None = None
         self.apikey: str = apikey
         self.pin: str = pin
         self.api_base: str = "https://api4.thetvdb.com/v4"
 
     async def login(self) -> str | None:
-        # refresh token every hour
-        asyncio.get_event_loop().call_later(
-            3600, lambda: asyncio.create_task(self.login())
-        )
         async with httpx.AsyncClient(http2=True) as client:
             response = await client.post(
                 f"{self.api_base}/login",
@@ -25,6 +23,8 @@ class TVDB:
             )
             if response.status_code == 200:
                 self.token = response.json().get("data", {}).get("token")
+                # set token to expire in an hour
+                self.token_expires = datetime.now().timestamp() + 3600
                 logger.info("TVDB token refreshed!")
             else:
                 logger.error("TVDB token refresh failed!")
