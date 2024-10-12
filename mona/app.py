@@ -33,7 +33,10 @@ tvdb = TVDB(os.environ["TVDB_API_KEY"])
 async def tvdb_login(request: Request, call_next):
     if tvdb.token is None:
         await tvdb.login()
-    elif datetime.now().timestamp() > tvdb.token_expires:
+    elif (
+        tvdb.token_expires is not None
+        and datetime.now().timestamp() > tvdb.token_expires
+    ):
         await tvdb.login()
     response = await call_next(request)
     return response

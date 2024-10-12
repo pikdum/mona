@@ -10,7 +10,7 @@ from loguru import logger
 class TVDB:
     def __init__(self, apikey: str, pin: str = "hello world"):
         self.token: str | None = None
-        self.token_expires: int | None = None
+        self.token_expires: float | None = None
         self.apikey: str = apikey
         self.pin: str = pin
         self.api_base: str = "https://api4.thetvdb.com/v4"
