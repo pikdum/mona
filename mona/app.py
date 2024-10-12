@@ -2,31 +2,21 @@
 import os
 import random
 import re
-from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import anitopy
 import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import RedirectResponse
-from fastapi_cache import FastAPICache
-from fastapi_cache.backends.inmemory import InMemoryBackend
-from fastapi_cache.decorator import cache
 from loguru import logger
 from lxml import html
+from theine import Cache
 
 from mona.tvdb import TVDB
 
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    FastAPICache.init(InMemoryBackend())
-    yield
-
-
-app = FastAPI(docs_url="/", redoc_url=None, lifespan=lifespan)
-
+app = FastAPI(docs_url="/", redoc_url=None)
 tvdb = TVDB(os.environ["TVDB_API_KEY"])
+cache = Cache("clockpro", 10000)
 
 
 @app.middleware("http")
@@ -97,7 +87,6 @@ def priority_sort_key(obj):
     return (lang_priority, type_priority)
 
 
-@cache(expire=86400)
 async def find_best_match(search_string: str) -> dict | None:
     results = await tvdb.search(search_string)
     if not results:
@@ -107,7 +96,6 @@ async def find_best_match(search_string: str) -> dict | None:
     return selected
 
 
-@cache(expire=86400)
 async def get_tvdb_poster(parsed: dict[str, str]) -> str | None:
     search_string = get_search_string(parsed)
     if not search_string:
@@ -124,7 +112,6 @@ async def get_tvdb_poster(parsed: dict[str, str]) -> str | None:
     return season_image or series_image
 
 
-@cache(expire=86400)
 async def get_subsplease_poster(name: str) -> str | None:
     logger.info(f"Searching for: {name}")
     words = slugify(name).split("-")
@@ -142,18 +129,22 @@ async def get_subsplease_poster(name: str) -> str | None:
 
 @app.get("/poster")
 async def poster(query: str):
+    cache_key = f"p:{query}"
+    if cached := cache.get(cache_key):
+        return RedirectResponse(url=cached, status_code=302)
     if not (parsed := anitopy.parse(query)) or not (title := parsed.get("anime_title")):
         raise HTTPException(status_code=400, detail="query is invalid")
     poster = await get_tvdb_poster(parsed)
     if poster:
+        cache.set(cache_key, poster, timedelta(days=1))
         return RedirectResponse(url=poster, status_code=302)
     poster = await get_subsplease_poster(title)
     if poster:
+        cache.set(cache_key, poster, timedelta(days=1))
         return RedirectResponse(url=poster, status_code=302)
     raise HTTPException(status_code=404, detail="poster not found")
 
 
-@cache(expire=86400)
 async def get_fanart(parsed: dict[str, str]) -> list[dict] | None:
     search_string = get_search_string(parsed)
     if not search_string:
@@ -180,15 +171,18 @@ async def get_fanart(parsed: dict[str, str]) -> list[dict] | None:
 
 @app.get("/fanart")
 async def fanart(query: str):
+    cache_key = f"f:{query}"
+    if cached := cache.get(cache_key):
+        return RedirectResponse(url=cached, status_code=302)
     if not (parsed := anitopy.parse(query)):
         raise HTTPException(status_code=400, detail="query is invalid")
     fanart = await get_fanart(parsed)
     if not fanart or not (image := random.choice(fanart).get("image")):
         raise HTTPException(status_code=404, detail="fanart not found")
+    cache.set(cache_key, image, timedelta(days=1))
     return RedirectResponse(url=image, status_code=302)
 
 
-@cache(expire=86400)
 async def get_torrent_art(url: str):
     async with httpx.AsyncClient(http2=True) as client:
         response = await client.get(url, follow_redirects=True)
