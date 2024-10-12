@@ -10,7 +10,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from loguru import logger
 from lxml import html
-from theine import Cache
+from theine import Cache, Memoize
 
 from mona.tvdb import TVDB
 
@@ -183,6 +183,7 @@ async def fanart(query: str):
     return RedirectResponse(url=image, status_code=302)
 
 
+@Memoize(cache, None, typed=True)
 async def get_torrent_art(url: str):
     async with httpx.AsyncClient(http2=True) as client:
         response = await client.get(url, follow_redirects=True)
