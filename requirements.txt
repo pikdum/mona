@@ -1,5 +1,5 @@
 anitopy==2.1.1
-fastapi==0.115.5
+fastapi==0.115.6
 httpx[http2]==0.28.0
 loguru==0.7.2
 lxml==5.3.0
