@@ -1,6 +1,6 @@
 anitopy==2.1.1
 fastapi==0.115.5
-httpx[http2]==0.27.2
+httpx[http2]==0.28.0
 loguru==0.7.2
 lxml==5.3.0
 theine==0.4.4
