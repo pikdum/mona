@@ -82,12 +82,23 @@ async def get_season_image(tvdb_id: int, season_number: str | list[str]) -> str 
 
 
 def priority_sort_key(obj):
-    lang_priority = 0 if obj.get("primary_language") == "jpn" else 1
+    image_url = obj.get("image_url")
+    missing_image = 1 if not image_url or "missing" in image_url else 0
+    lang_priority = 0 if obj.get("primary_language") in ["jpn", "kor", "zho"] else 1
     type_priority = 0 if obj.get("type") == "series" else 1
-    return (lang_priority, type_priority)
+    data = str(obj).lower()
+    genre_priority = 0 if any(x in data for x in ["anime", "crunchyroll"]) else 1
+    return (missing_image, lang_priority, type_priority, genre_priority)
 
 
-async def find_best_match(search_string: str) -> dict | None:
+async def find_best_match(parsed: dict[str, str]) -> dict | None:
+    if file_name := parsed.get("file_name"):
+        if results := await tvdb.search(file_name):
+            selected = sorted(results, key=priority_sort_key)[0]
+            return selected
+    search_string = get_search_string(parsed)
+    if not search_string:
+        return None
     results = await tvdb.search(search_string)
     if not results:
         logger.info(f"No results found for: {search_string}")
@@ -97,10 +108,7 @@ async def find_best_match(search_string: str) -> dict | None:
 
 
 async def get_tvdb_poster(parsed: dict[str, str]) -> str | None:
-    search_string = get_search_string(parsed)
-    if not search_string:
-        return None
-    series = await find_best_match(search_string)
+    series = await find_best_match(parsed)
     if not series:
         return None
     series_image = series.get("image_url")
@@ -146,10 +154,7 @@ async def poster(query: str):
 
 
 async def get_fanart(parsed: dict[str, str]) -> list[dict] | None:
-    search_string = get_search_string(parsed)
-    if not search_string:
-        return None
-    series = await find_best_match(search_string)
+    series = await find_best_match(parsed)
     if (
         not series
         or not (series_id := series.get("tvdb_id"))
