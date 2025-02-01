@@ -1,6 +1,4 @@
 #!/usr/bin/env python3
-import asyncio
-import os
 from datetime import datetime
 
 import httpx
@@ -88,24 +86,3 @@ class TVDB:
             if response.status_code == 200:
                 return response.json().get("data")
         return None
-
-
-async def main():
-    tvdb = TVDB(os.environ["TVDB_API_KEY"])
-    token = await tvdb.login()
-    results = await tvdb.search("Yuyushiki")
-    series_id = results[0]["tvdb_id"]
-    series = await tvdb.get_series_extended(series_id)
-    artworks = await tvdb.get_series_artworks(series_id)
-    movie = await tvdb.get_movie_extended(16609)
-    assert token
-    assert results
-    assert series_id
-    assert series
-    assert artworks
-    assert movie
-    print("All tests passed!")
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
