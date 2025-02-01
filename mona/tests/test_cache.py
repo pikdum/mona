@@ -1,4 +1,5 @@
-from datetime import timedelta
+from datetime import datetime, timedelta
+from unittest.mock import patch
 
 import pytest
 from mona.cache import Cache, Memoize
@@ -20,14 +21,14 @@ def test_cache_set_and_get(cache):
 
 
 def test_cache_expiry(cache):
-    cache.set("key", "value", timedelta(seconds=1))
-    assert cache.get("key") == "value"
+    with patch("mona.cache.datetime") as mock_datetime:
+        mock_datetime.now.return_value = datetime(2023, 1, 1, 12, 0, 0)
+        cache.set("key", "value", timedelta(seconds=1))
+        assert cache.get("key") == "value"
 
-    # Simulate time passing
-    import time
-
-    time.sleep(1.1)
-    assert cache.get("key") is None
+        # Simulate time passing by advancing the mock
+        mock_datetime.now.return_value = datetime(2023, 1, 1, 12, 0, 2)
+        assert cache.get("key") is None
 
 
 def test_cache_override(cache):
