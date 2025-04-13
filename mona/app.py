@@ -81,29 +81,106 @@ async def get_season_image(tvdb_id: int, season_number: str | list[str]) -> str 
     return None
 
 
-def priority_sort_key(obj):
+def calculate_enhanced_title_relevance(obj, query):
+    """
+    Calculate title relevance accounting for all potential title fields:
+    - translations.eng (English translation)
+    - name (original name, often in original language)
+    - aliases (list of alternative titles)
+    - slug (URL-friendly version of title)
+
+    Returns a score between 0-100
+    """
+    if not query:
+        return 0
+
+    query_lower = query.lower()
+
+    # Extract all possible title fields
+    eng_translation = obj.get("translations", {}).get("eng", "").lower()
+    name = obj.get("name", "").lower()
+    slug = obj.get("slug", "").lower().replace("-", " ")
+    aliases = [alias.lower() for alias in obj.get("aliases", [])]
+
+    # Check for exact matches first (100 points)
+    if eng_translation == query_lower or name == query_lower or query_lower in aliases:
+        return 100
+
+    # Check if slug is an exact match without numbers (helpful for "to-be-hero-x-2020" type slugs)
+    slug_without_year = re.sub(r"-\d+$", "", slug)
+    if slug_without_year == query_lower.replace(" ", "-"):
+        return 100
+
+    # Check if any field contains the full query (90 points)
+    if (
+        eng_translation.find(query_lower) >= 0
+        or name.find(query_lower) >= 0
+        or slug.find(query_lower.replace(" ", "-")) >= 0
+        or any(alias.find(query_lower) >= 0 for alias in aliases)
+    ):
+        return 90
+
+    # Check for partial word matches
+    query_words = [w for w in query_lower.split() if len(w) > 1]
+    if not query_words:
+        return 0
+
+    # Combine all text fields for word matching
+    all_text = " ".join([eng_translation, name, slug] + aliases)
+    matched_words = sum(1 for word in query_words if word in all_text)
+    word_match_percentage = (matched_words / len(query_words)) * 80
+
+    return word_match_percentage
+
+
+def hybrid_priority_score(obj, query):
+    """
+    Calculate a hybrid score that balances anime preferences with enhanced title relevance.
+    Returns a score where higher is better.
+    """
+    # Base priorities from original function (anime characteristics)
     image_url = obj.get("image_url")
-    missing_image = 1 if not image_url or "missing" in image_url else 0
-    lang_priority = 0 if obj.get("primary_language") in ["jpn", "kor", "zho"] else 1
-    type_priority = 0 if obj.get("type") == "series" else 1
+    has_image = 0 if not image_url or "missing" in image_url else 20
+    is_asian = 30 if obj.get("primary_language") in ["jpn", "kor", "zho"] else 0
+    is_series = 10 if obj.get("type") == "series" else 0
     data = str(obj).lower()
-    genre_priority = 0 if any(x in data for x in ["anime", "crunchyroll"]) else 1
-    return (missing_image, lang_priority, type_priority, genre_priority)
+    is_anime = 20 if any(x in data for x in ["anime", "crunchyroll"]) else 0
+
+    # Enhanced title relevance (0-100)
+    title_relevance = calculate_enhanced_title_relevance(obj, query)
+
+    # Final score calculation with weights
+    anime_score = has_image + is_asian + is_series + is_anime  # Max 80
+
+    # Weight balance (adjust if needed)
+    weighted_title_score = title_relevance * 0.6  # 0-60 points
+    weighted_anime_score = anime_score * 0.4  # 0-32 points
+
+    return weighted_title_score + weighted_anime_score
 
 
 async def find_best_match(parsed: dict[str, str]) -> dict | None:
     if file_name := parsed.get("file_name"):
         if results := await tvdb.search(file_name):
-            selected = sorted(results, key=priority_sort_key)[0]
+            # Sort by hybrid score (note negative sign for descending sort)
+            selected = sorted(
+                results, key=lambda obj: -hybrid_priority_score(obj, file_name)
+            )[0]
             return selected
+
     search_string = get_search_string(parsed)
     if not search_string:
         return None
+
     results = await tvdb.search(search_string)
     if not results:
         logger.info(f"No results found for: {search_string}")
         return None
-    selected = sorted(results, key=priority_sort_key)[0]
+
+    # Sort by hybrid score (descending)
+    selected = sorted(
+        results, key=lambda obj: -hybrid_priority_score(obj, search_string)
+    )[0]
     return selected
 
 
