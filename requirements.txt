@@ -3,4 +3,4 @@ fastapi==0.115.12
 httpx[http2]==0.28.1
 loguru==0.7.3
 lxml==5.4.0
-uvicorn==0.34.0
+uvicorn==0.34.2
