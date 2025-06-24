@@ -1,9 +1,8 @@
 FROM python:3.13-slim
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 WORKDIR /app
-COPY requirements.txt .
-RUN uv pip install --system --no-cache-dir -r requirements.txt
+COPY pyproject.toml uv.lock .
+RUN uv sync --no-dev --frozen --no-cache
 COPY . .
-ENV UVICORN_PORT=8080
-ENV UVICORN_HOST=0.0.0.0
-CMD ["uvicorn", "mona.app:app"]
+EXPOSE 8080
+CMD ["/app/.venv/bin/uvicorn", "mona.app:app", "--host", "0.0.0.0", "--port", "8080"]
