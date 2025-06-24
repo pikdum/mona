@@ -18,7 +18,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
       - run: uv venv
-      - run: uv pip install -r requirements.txt -r requirements-dev.txt
+      - run: uv sync
       - run: uv run pyright
   pytest:
     strategy:
@@ -31,7 +31,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: uv venv
-      - run: uv pip install -r requirements.txt -r requirements-dev.txt
+      - run: uv sync
       - run: uv run pytest
         env:
           TVDB_API_KEY: ${{ secrets.TVDB_API_KEY }}
