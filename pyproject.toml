@@ -1,0 +1,21 @@
+[project]
+name = "mona"
+version = "0.1.0"
+description = "anime poster + fanart api"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "anitopy==2.1.1",
+    "fastapi==0.115.13",
+    "httpx[http2]==0.28.1",
+    "loguru==0.7.3",
+    "lxml==5.4.0",
+    "uvicorn==0.34.3",
+]
+
+[dependency-groups]
+dev = [
+    "pyright==1.1.402",
+    "pytest==8.4.1",
+    "pytest-asyncio==1.0.0",
+]
