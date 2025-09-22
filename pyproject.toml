@@ -9,7 +9,7 @@ dependencies = [
     "fastapi==0.116.1",
     "httpx[http2]==0.28.1",
     "loguru==0.7.3",
-    "lxml==6.0.1",
+    "lxml==6.0.2",
     "uvicorn==0.35.0",
 ]
 
