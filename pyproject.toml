@@ -3,7 +3,7 @@ name = "mona"
 version = "0.1.0"
 description = "anime poster + fanart api"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.14"
 dependencies = [
     "anitopy==2.1.1",
     "fastapi==0.122.0",
