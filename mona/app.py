@@ -216,7 +216,7 @@ async def get_subsplease_poster(name: str) -> str | None:
 async def poster(query: str):
     cache_key = f"p:{query}"
     url, cached = cache.get(cache_key)
-    if cached:
+    if cached and url:
         return RedirectResponse(url=url, status_code=302)
     if not (parsed := anitopy.parse(query)) or not (title := parsed.get("anime_title")):
         raise HTTPException(status_code=400, detail="query is invalid")
@@ -255,8 +255,9 @@ async def get_fanart(parsed: dict[str, str]) -> list[dict] | None:
 @app.get("/fanart")
 async def fanart(query: str):
     cache_key = f"f:{query}"
-    if cached := cache.get(cache_key):
-        return RedirectResponse(url=cached, status_code=302)
+    url, cached = cache.get(cache_key)
+    if cached and url:
+        return RedirectResponse(url=url, status_code=302)
     if not (parsed := anitopy.parse(query)):
         raise HTTPException(status_code=400, detail="query is invalid")
     fanart = await get_fanart(parsed)
