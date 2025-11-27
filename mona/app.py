@@ -10,13 +10,13 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from loguru import logger
 from lxml import html
+from theine import Cache, Memoize
 
-from mona.cache import Cache, Memoize
 from mona.tvdb import TVDB
 
 app = FastAPI(docs_url="/", redoc_url=None)
 tvdb = TVDB(os.environ["TVDB_API_KEY"])
-cache = Cache()
+cache = Cache(10000)
 
 
 @app.middleware("http")
@@ -215,8 +215,9 @@ async def get_subsplease_poster(name: str) -> str | None:
 @app.get("/poster")
 async def poster(query: str):
     cache_key = f"p:{query}"
-    if cached := cache.get(cache_key):
-        return RedirectResponse(url=cached, status_code=302)
+    url, cached = cache.get(cache_key)
+    if cached:
+        return RedirectResponse(url=url, status_code=302)
     if not (parsed := anitopy.parse(query)) or not (title := parsed.get("anime_title")):
         raise HTTPException(status_code=400, detail="query is invalid")
     poster = await get_tvdb_poster(parsed)
@@ -265,7 +266,7 @@ async def fanart(query: str):
     return RedirectResponse(url=image, status_code=302)
 
 
-@Memoize(cache)
+@Memoize(10000, timedelta(days=1))
 async def get_torrent_art(url: str):
     async with httpx.AsyncClient(http2=True) as client:
         response = await client.get(url, follow_redirects=True)

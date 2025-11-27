@@ -11,6 +11,7 @@ dependencies = [
     "loguru==0.7.3",
     "lxml==6.0.2",
     "uvicorn==0.37.0",
+    "theine==2.0.0"
 ]
 
 [dependency-groups]
