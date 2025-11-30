@@ -16,7 +16,7 @@ from mona.tvdb import TVDB
 
 app = FastAPI(docs_url="/", redoc_url=None)
 tvdb = TVDB(os.environ["TVDB_API_KEY"])
-cache = Cache(10000)
+cache = Cache(1000)
 
 
 @app.middleware("http")
@@ -267,7 +267,7 @@ async def fanart(query: str):
     return RedirectResponse(url=image, status_code=302)
 
 
-@Memoize(10000, timedelta(days=1))
+@Memoize(1000, timedelta(days=1))
 async def get_torrent_art(url: str):
     async with httpx.AsyncClient(http2=True) as client:
         response = await client.get(url, follow_redirects=True)
