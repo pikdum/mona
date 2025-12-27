@@ -10,7 +10,7 @@ dependencies = [
     "httpx[http2]==0.28.1",
     "loguru==0.7.3",
     "lxml==6.0.2",
-    "uvicorn[standard]==0.38.0",
+    "uvicorn[standard]==0.40.0",
     "theine==2.0.0"
 ]
 
