@@ -1,5 +1,6 @@
 use std::env;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use anitomy::{Anitomy, ElementCategory};
@@ -32,6 +33,16 @@ struct AppState {
     poster_cache: Cache<String, String>,
     fanart_cache: Cache<String, String>,
     torrent_cache: Cache<String, String>,
+    poster_metrics: Arc<CacheMetrics>,
+    fanart_metrics: Arc<CacheMetrics>,
+    torrent_metrics: Arc<CacheMetrics>,
+}
+
+#[derive(Default)]
+struct CacheMetrics {
+    hits: AtomicU64,
+    misses: AtomicU64,
+    inserts: AtomicU64,
 }
 
 #[derive(Debug, Clone)]
@@ -102,10 +113,13 @@ async fn main() {
             .max_capacity(5000)
             .time_to_live(ttl)
             .build(),
-        torrent_cache: Cache::builder()
-            .max_capacity(5000)
-            .build(),
+        torrent_cache: Cache::builder().max_capacity(5000).build(),
+        poster_metrics: Arc::new(CacheMetrics::default()),
+        fanart_metrics: Arc::new(CacheMetrics::default()),
+        torrent_metrics: Arc::new(CacheMetrics::default()),
     };
+
+    spawn_cache_stats_logger(&state);
 
     let poster_router = Router::new()
         .route("/poster", get(poster))
@@ -331,12 +345,60 @@ async fn request_logging_middleware(
     response
 }
 
+fn spawn_cache_stats_logger(state: &AppState) {
+    let poster_cache = state.poster_cache.clone();
+    let fanart_cache = state.fanart_cache.clone();
+    let torrent_cache = state.torrent_cache.clone();
+    let poster_metrics = state.poster_metrics.clone();
+    let fanart_metrics = state.fanart_metrics.clone();
+    let torrent_metrics = state.torrent_metrics.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(300));
+        loop {
+            interval.tick().await;
+            log_cache_stats("poster", &poster_cache, &poster_metrics).await;
+            log_cache_stats("fanart", &fanart_cache, &fanart_metrics).await;
+            log_cache_stats("torrent", &torrent_cache, &torrent_metrics).await;
+        }
+    });
+}
+
+async fn log_cache_stats(name: &str, cache: &Cache<String, String>, metrics: &CacheMetrics) {
+    cache.run_pending_tasks().await;
+    let hits = metrics.hits.load(Ordering::Relaxed);
+    let misses = metrics.misses.load(Ordering::Relaxed);
+    let inserts = metrics.inserts.load(Ordering::Relaxed);
+    let total = hits + misses;
+    let hit_rate = if total == 0 {
+        0.0
+    } else {
+        hits as f64 / total as f64
+    };
+    let hit_rate_percent = hit_rate * 100.0;
+    tracing::info!(
+        cache = name,
+        entries = cache.entry_count(),
+        hits,
+        misses,
+        inserts,
+        hit_rate = %format!("{:.1}%", hit_rate_percent),
+        "cache stats"
+    );
+}
+
 async fn cache_poster_middleware(
     State(state): State<AppState>,
     req: axum::http::Request<axum::body::Body>,
     next: Next,
 ) -> Response {
-    cache_redirect_by_query(state.poster_cache.clone(), "query", req, next).await
+    cache_redirect_by_query(
+        state.poster_cache.clone(),
+        state.poster_metrics.clone(),
+        "query",
+        req,
+        next,
+    )
+    .await
 }
 
 async fn cache_fanart_middleware(
@@ -344,7 +406,14 @@ async fn cache_fanart_middleware(
     req: axum::http::Request<axum::body::Body>,
     next: Next,
 ) -> Response {
-    cache_redirect_by_query(state.fanart_cache.clone(), "query", req, next).await
+    cache_redirect_by_query(
+        state.fanart_cache.clone(),
+        state.fanart_metrics.clone(),
+        "query",
+        req,
+        next,
+    )
+    .await
 }
 
 async fn cache_torrent_middleware(
@@ -352,11 +421,19 @@ async fn cache_torrent_middleware(
     req: axum::http::Request<axum::body::Body>,
     next: Next,
 ) -> Response {
-    cache_redirect_by_query(state.torrent_cache.clone(), "url", req, next).await
+    cache_redirect_by_query(
+        state.torrent_cache.clone(),
+        state.torrent_metrics.clone(),
+        "url",
+        req,
+        next,
+    )
+    .await
 }
 
 async fn cache_redirect_by_query(
     cache: Cache<String, String>,
+    metrics: Arc<CacheMetrics>,
     param_name: &str,
     req: axum::http::Request<axum::body::Body>,
     next: Next,
@@ -365,7 +442,11 @@ async fn cache_redirect_by_query(
     if let Some(key) = cache_key.as_ref()
         && let Some(url) = cache.get(key).await
     {
+        metrics.hits.fetch_add(1, Ordering::Relaxed);
         return Redirect::temporary(&url).into_response();
+    }
+    if cache_key.is_some() {
+        metrics.misses.fetch_add(1, Ordering::Relaxed);
     }
 
     let response = next.run(req).await;
@@ -380,6 +461,7 @@ async fn cache_redirect_by_query(
         )
     {
         cache.insert(key, location).await;
+        metrics.inserts.fetch_add(1, Ordering::Relaxed);
     }
 
     response
@@ -876,9 +958,10 @@ mod tests {
                 .max_capacity(5000)
                 .time_to_live(ttl)
                 .build(),
-            torrent_cache: Cache::builder()
-                .max_capacity(5000)
-                .build(),
+            torrent_cache: Cache::builder().max_capacity(5000).build(),
+            poster_metrics: Arc::new(CacheMetrics::default()),
+            fanart_metrics: Arc::new(CacheMetrics::default()),
+            torrent_metrics: Arc::new(CacheMetrics::default()),
         }
     }
 
