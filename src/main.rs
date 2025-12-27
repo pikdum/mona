@@ -87,7 +87,7 @@ async fn main() {
             std::process::exit(1);
         }
     };
-    let ttl = Duration::from_secs(60 * 60 * 24);
+    let ttl = Duration::from_secs(60 * 60 * 24 * 3);
     let state = AppState {
         tvdb: Arc::new(RwLock::new(TVDB::new(api_key))),
         http: reqwest::Client::builder()
@@ -95,16 +95,15 @@ async fn main() {
             .build()
             .unwrap(),
         poster_cache: Cache::builder()
-            .max_capacity(1000)
+            .max_capacity(5000)
             .time_to_live(ttl)
             .build(),
         fanart_cache: Cache::builder()
-            .max_capacity(1000)
+            .max_capacity(5000)
             .time_to_live(ttl)
             .build(),
         torrent_cache: Cache::builder()
-            .max_capacity(1000)
-            .time_to_live(ttl)
+            .max_capacity(5000)
             .build(),
     };
 
@@ -862,7 +861,7 @@ mod tests {
     }
 
     fn test_state(api_key: String) -> AppState {
-        let ttl = Duration::from_secs(60 * 60 * 24);
+        let ttl = Duration::from_secs(60 * 60 * 24 * 3);
         AppState {
             tvdb: Arc::new(RwLock::new(TVDB::new(api_key))),
             http: reqwest::Client::builder()
@@ -870,16 +869,15 @@ mod tests {
                 .build()
                 .unwrap(),
             poster_cache: Cache::builder()
-                .max_capacity(1000)
+                .max_capacity(5000)
                 .time_to_live(ttl)
                 .build(),
             fanart_cache: Cache::builder()
-                .max_capacity(1000)
+                .max_capacity(5000)
                 .time_to_live(ttl)
                 .build(),
             torrent_cache: Cache::builder()
-                .max_capacity(1000)
-                .time_to_live(ttl)
+                .max_capacity(5000)
                 .build(),
         }
     }
