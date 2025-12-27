@@ -6,7 +6,7 @@ use anitomy::{Anitomy, ElementCategory};
 use axum::Router;
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
-use axum::middleware::{Next, from_fn_with_state};
+use axum::middleware::{Next, from_fn, from_fn_with_state};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::get;
 use moka::future::Cache;
@@ -17,6 +17,7 @@ use scraper::{Html, Selector};
 use serde::Deserialize;
 use serde_json::Value;
 use tokio::sync::RwLock;
+use tracing_subscriber::EnvFilter;
 use url::form_urlencoded;
 use utoipa::{OpenApi, ToSchema};
 use utoipa_swagger_ui::SwaggerUi;
@@ -72,6 +73,12 @@ struct ApiDoc;
 #[tokio::main]
 async fn main() {
     dotenvy::dotenv().ok();
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    tracing_subscriber::fmt()
+        .compact()
+        .with_target(false)
+        .with_env_filter(filter)
+        .init();
 
     let api_key = match env::var("TVDB_API_KEY") {
         Ok(value) if !value.trim().is_empty() => value,
@@ -123,7 +130,8 @@ async fn main() {
         .route("/healthcheck", get(healthcheck).head(healthcheck))
         .merge(poster_router)
         .merge(fanart_router)
-        .merge(torrent_router);
+        .merge(torrent_router)
+        .layer(from_fn(request_logging_middleware));
 
     let addr = "0.0.0.0:3000";
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
@@ -299,6 +307,29 @@ async fn tvdb_login_middleware(
         return (StatusCode::BAD_GATEWAY, "tvdb login failed").into_response();
     }
     next.run(req).await
+}
+
+async fn request_logging_middleware(
+    req: axum::http::Request<axum::body::Body>,
+    next: Next,
+) -> Response {
+    let method = req.method().clone();
+    let uri = req.uri().clone();
+    let path = uri.path();
+    if path == "/healthcheck" {
+        return next.run(req).await;
+    }
+
+    let start = std::time::Instant::now();
+    let response = next.run(req).await;
+    tracing::info!(
+        method = %method,
+        uri = %uri,
+        status = response.status().as_u16(),
+        latency_ms = start.elapsed().as_millis(),
+        "request"
+    );
+    response
 }
 
 async fn cache_poster_middleware(
