@@ -3,21 +3,21 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anitomy::{Anitomy, ElementCategory};
+use axum::Router;
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
-use axum::middleware::{from_fn_with_state, Next};
+use axum::middleware::{Next, from_fn_with_state};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::get;
-use axum::Router;
 use moka::future::Cache;
 use rand::prelude::IndexedRandom;
 use regex::Regex;
 use reqwest::redirect::Policy;
-use url::form_urlencoded;
 use scraper::{Html, Selector};
 use serde::Deserialize;
 use serde_json::Value;
 use tokio::sync::RwLock;
+use url::form_urlencoded;
 use utoipa::{OpenApi, ToSchema};
 use utoipa_swagger_ui::SwaggerUi;
 
@@ -33,8 +33,7 @@ struct AppState {
     torrent_cache: Cache<String, String>,
 }
 
-#[derive(Debug)]
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 struct ParsedQuery {
     file_name: String,
     anime_title: String,
@@ -187,7 +186,12 @@ async fn poster(
 
     if let Some(poster) = get_subsplease_poster(&state.http, &parsed.anime_title)
         .await
-        .map_err(|_| (StatusCode::BAD_GATEWAY, "subsplease request failed".to_string()))?
+        .map_err(|_| {
+            (
+                StatusCode::BAD_GATEWAY,
+                "subsplease request failed".to_string(),
+            )
+        })?
     {
         return Ok(Redirect::temporary(&poster));
     }
@@ -255,9 +259,7 @@ async fn torrent_art(
     State(state): State<AppState>,
     Query(params): Query<TorrentQuery>,
 ) -> Result<Redirect, (StatusCode, String)> {
-    if !params
-        .url
-        .starts_with("https://nyaa.si")
+    if !params.url.starts_with("https://nyaa.si")
         && !params.url.starts_with("https://sukebei.nyaa.si/")
     {
         return Err((StatusCode::BAD_REQUEST, "invalid url".to_string()));
@@ -265,7 +267,12 @@ async fn torrent_art(
 
     let image = get_torrent_art(&state.http, &params.url)
         .await
-        .map_err(|_| (StatusCode::BAD_GATEWAY, "torrent request failed".to_string()))?
+        .map_err(|_| {
+            (
+                StatusCode::BAD_GATEWAY,
+                "torrent request failed".to_string(),
+            )
+        })?
         .ok_or((StatusCode::NOT_FOUND, "art not found".to_string()))?;
 
     Ok(Redirect::temporary(&image))
@@ -288,7 +295,7 @@ async fn tvdb_login_middleware(
     req: axum::http::Request<axum::body::Body>,
     next: Next,
 ) -> Response {
-    if let Err(_) = ensure_tvdb_login(&state.tvdb).await {
+    if ensure_tvdb_login(&state.tvdb).await.is_err() {
         return (StatusCode::BAD_GATEWAY, "tvdb login failed").into_response();
     }
     next.run(req).await
@@ -325,24 +332,24 @@ async fn cache_redirect_by_query(
     next: Next,
 ) -> Response {
     let cache_key = extract_query_param(req.uri(), param_name);
-    if let Some(key) = cache_key.as_ref() {
-        if let Some(url) = cache.get(key).await {
-            return Redirect::temporary(&url).into_response();
-        }
+    if let Some(key) = cache_key.as_ref()
+        && let Some(url) = cache.get(key).await
+    {
+        return Redirect::temporary(&url).into_response();
     }
 
     let response = next.run(req).await;
-    if response.status() == StatusCode::TEMPORARY_REDIRECT {
-        if let (Some(key), Some(location)) = (
+    if response.status() == StatusCode::TEMPORARY_REDIRECT
+        && let (Some(key), Some(location)) = (
             cache_key,
             response
                 .headers()
                 .get(axum::http::header::LOCATION)
                 .and_then(|value| value.to_str().ok())
                 .map(|value| value.to_string()),
-        ) {
-            cache.insert(key, location).await;
-        }
+        )
+    {
+        cache.insert(key, location).await;
     }
 
     response
@@ -363,9 +370,7 @@ fn parse_query(query: &str) -> Option<ParsedQuery> {
     let elements = parser.parse(query).ok()?;
 
     let anime_title = elements.get(ElementCategory::AnimeTitle)?.to_string();
-    let anime_year = elements
-        .get(ElementCategory::AnimeYear)
-        .map(str::to_string);
+    let anime_year = elements.get(ElementCategory::AnimeYear).map(str::to_string);
     let anime_season = elements
         .get(ElementCategory::AnimeSeason)
         .map(str::to_string);
@@ -400,7 +405,10 @@ async fn ensure_tvdb_login(tvdb: &Arc<RwLock<TVDB>>) -> Result<(), reqwest::Erro
     Ok(())
 }
 
-async fn get_tvdb_poster(tvdb: &TVDB, parsed: &ParsedQuery) -> Result<Option<String>, reqwest::Error> {
+async fn get_tvdb_poster(
+    tvdb: &TVDB,
+    parsed: &ParsedQuery,
+) -> Result<Option<String>, reqwest::Error> {
     let mut series = find_best_match(tvdb, parsed).await?;
     if series.is_none() {
         return Ok(None);
@@ -409,18 +417,18 @@ async fn get_tvdb_poster(tvdb: &TVDB, parsed: &ParsedQuery) -> Result<Option<Str
     let series = series.take().unwrap();
     let mut series_id = extract_tvdb_id(&series);
     let mut series_image = extract_image_url(&series).map(str::to_string);
-    if series_id.is_none() && series_image.is_none() {
-        if let Some(fallback) = find_best_match_by_title(tvdb, parsed).await? {
-            series_id = extract_tvdb_id(&fallback);
-            series_image = extract_image_url(&fallback).map(str::to_string);
-        }
+    if series_id.is_none()
+        && series_image.is_none()
+        && let Some(fallback) = find_best_match_by_title(tvdb, parsed).await?
+    {
+        series_id = extract_tvdb_id(&fallback);
+        series_image = extract_image_url(&fallback).map(str::to_string);
     }
-    if series_image.is_none() {
-        if let Some(series_id) = series_id {
-            if let Some(details) = tvdb.get_series_extended(series_id).await? {
-                series_image = extract_image_url(&details).map(str::to_string);
-            }
-        }
+    if series_image.is_none()
+        && let Some(series_id) = series_id
+        && let Some(details) = tvdb.get_series_extended(series_id).await?
+    {
+        series_image = extract_image_url(&details).map(str::to_string);
     }
     let season = parsed.anime_season.as_deref();
 
@@ -559,13 +567,11 @@ async fn search_by_title(
 }
 
 fn select_best_match<'a>(results: &'a [Value], query: &str) -> Option<&'a Value> {
-    results
-        .iter()
-        .max_by(|a, b| {
-            let score_a = hybrid_priority_score(a, query);
-            let score_b = hybrid_priority_score(b, query);
-            score_a.total_cmp(&score_b)
-        })
+    results.iter().max_by(|a, b| {
+        let score_a = hybrid_priority_score(a, query);
+        let score_b = hybrid_priority_score(b, query);
+        score_a.total_cmp(&score_b)
+    })
 }
 
 fn hybrid_priority_score(obj: &Value, query: &str) -> f32 {
@@ -586,11 +592,7 @@ fn hybrid_priority_score(obj: &Value, query: &str) -> f32 {
         0.0
     };
 
-    let is_series = if obj
-        .get("type")
-        .and_then(|value| value.as_str())
-        == Some("series")
-    {
+    let is_series = if obj.get("type").and_then(|value| value.as_str()) == Some("series") {
         10.0
     } else {
         0.0
@@ -668,7 +670,10 @@ fn calculate_enhanced_title_relevance(obj: &Value, query: &str) -> f32 {
         return 90.0;
     }
 
-    let query_words: Vec<&str> = query_lower.split_whitespace().filter(|w| w.len() > 1).collect();
+    let query_words: Vec<&str> = query_lower
+        .split_whitespace()
+        .filter(|w| w.len() > 1)
+        .collect();
     if query_words.is_empty() {
         return 0.0;
     }
@@ -767,10 +772,10 @@ async fn get_subsplease_poster(
             let body = response.text().await?;
             let document = Html::parse_document(&body);
             let selector = Selector::parse("img").unwrap();
-            if let Some(img) = document.select(&selector).next() {
-                if let Some(src) = img.value().attr("src") {
-                    return Ok(Some(format!("https://subsplease.org{}", src)));
-                }
+            if let Some(img) = document.select(&selector).next()
+                && let Some(src) = img.value().attr("src")
+            {
+                return Ok(Some(format!("https://subsplease.org{}", src)));
             }
         }
         if !words.is_empty() {
@@ -799,18 +804,16 @@ async fn get_torrent_art(
 
     let html = description.inner_html();
     let re = Regex::new(r#"https?://[^\s"']+?\.(?:jpg|jpeg|png|gif)"#).unwrap();
-    Ok(re
-        .find(&html)
-        .map(|value| value.as_str().to_string()))
+    Ok(re.find(&html).map(|value| value.as_str().to_string()))
 }
 
 fn slugify(text: &str) -> String {
     let mut text = text.to_lowercase();
     let bracket_re = Regex::new(r"\[.*?\]").unwrap();
     text = bracket_re.replace_all(&text, "").to_string();
-    text = text.replace('(', "").replace(')', "");
-    text = text.replace('\'', "").replace('\u{2019}', "");
-    text = text.replace('+', "").replace('@', "");
+    text = text.replace(['(', ')'], "");
+    text = text.replace(['\'', '\u{2019}'], "");
+    text = text.replace(['+', '@'], "");
     let non_alnum = Regex::new(r"[^a-zA-Z0-9_]+").unwrap();
     text = non_alnum.replace_all(&text, "-").to_string();
     text.trim_matches('-').to_string()
@@ -936,7 +939,10 @@ mod tests {
         });
         let results = vec![worse, better.clone()];
         let selected = select_best_match(&results, "Toradora").expect("no match selected");
-        assert_eq!(selected.get("name").and_then(|v| v.as_str()), Some("Toradora"));
+        assert_eq!(
+            selected.get("name").and_then(|v| v.as_str()),
+            Some("Toradora")
+        );
     }
 
     #[test]

@@ -1,11 +1,12 @@
 use std::time::{Duration, SystemTime};
 
 use reqwest::Client;
-use serde::de::DeserializeOwned;
 use serde::Deserialize;
+use serde::de::DeserializeOwned;
 use serde_json::Value;
 
 #[derive(Debug)]
+#[allow(clippy::upper_case_acronyms)]
 pub struct TVDB {
     api_key: String,
     pin: String,
@@ -67,7 +68,10 @@ impl TVDB {
         self.get_list("/search", &[("query", query)]).await
     }
 
-    pub async fn get_series_extended(&self, series_id: i64) -> Result<Option<Value>, reqwest::Error> {
+    pub async fn get_series_extended(
+        &self,
+        series_id: i64,
+    ) -> Result<Option<Value>, reqwest::Error> {
         self.get_one(&format!("/series/{}/extended", series_id), &[])
             .await
     }
@@ -95,7 +99,10 @@ impl TVDB {
             .await
     }
 
-    pub async fn get_season_extended(&self, season_id: i64) -> Result<Option<Value>, reqwest::Error> {
+    pub async fn get_season_extended(
+        &self,
+        season_id: i64,
+    ) -> Result<Option<Value>, reqwest::Error> {
         self.get_one(&format!("/seasons/{}/extended", season_id), &[])
             .await
     }
