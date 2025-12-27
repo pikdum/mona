@@ -12,32 +12,13 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - run: docker build .
-  pyright:
+  test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: astral-sh/setup-uv@v7
-      - run: uv venv
-      - run: uv sync
-      - run: uv run pyright
-  pytest:
-    strategy:
-      matrix:
-        python-version: ["3.14"]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: astral-sh/setup-uv@v7
+      - uses: actions-rs/toolchain@v1
         with:
-          python-version: ${{ matrix.python-version }}
-      - run: uv venv
-      - run: uv sync
-      - run: uv run pytest
-        env:
-          TVDB_API_KEY: ${{ secrets.TVDB_API_KEY }}
-  ruff:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: astral-sh/setup-uv@v7
-      - run: uvx ruff check
+          toolchain: stable
+          profile: minimal
+          override: true
+      - run: cargo test
