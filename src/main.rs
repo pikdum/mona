@@ -98,7 +98,7 @@ async fn main() {
             std::process::exit(1);
         }
     };
-    let ttl = Duration::from_secs(60 * 60 * 24 * 3);
+    let ttl = Duration::from_secs(60 * 60 * 12);
     let state = AppState {
         tvdb: Arc::new(RwLock::new(TVDB::new(api_key))),
         http: reqwest::Client::builder()
@@ -943,7 +943,7 @@ mod tests {
     }
 
     fn test_state(api_key: String) -> AppState {
-        let ttl = Duration::from_secs(60 * 60 * 24 * 3);
+        let ttl = Duration::from_secs(60 * 60 * 12);
         AppState {
             tvdb: Arc::new(RwLock::new(TVDB::new(api_key))),
             http: reqwest::Client::builder()
