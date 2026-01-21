@@ -481,11 +481,17 @@ fn parse_query(query: &str) -> Option<ParsedQuery> {
     let mut parser = Anitomy::new();
     let elements = parser.parse(query).ok()?;
 
-    let anime_title = elements.get(ElementCategory::AnimeTitle)?.to_string();
+    let mut anime_title = elements.get(ElementCategory::AnimeTitle)?.to_string();
     let anime_year = elements.get(ElementCategory::AnimeYear).map(str::to_string);
-    let anime_season = elements
+    let mut anime_season = elements
         .get(ElementCategory::AnimeSeason)
         .map(str::to_string);
+    if let Some((clean_title, season)) = extract_trailing_season(&anime_title) {
+        anime_title = clean_title;
+        if anime_season.is_none() {
+            anime_season = Some(season);
+        }
+    }
 
     Some(ParsedQuery {
         file_name: query.to_string(),
@@ -493,6 +499,24 @@ fn parse_query(query: &str) -> Option<ParsedQuery> {
         anime_year,
         anime_season,
     })
+}
+
+fn extract_trailing_season(title: &str) -> Option<(String, String)> {
+    let patterns = [
+        Regex::new(r"(?i)\s+s(\d+)\s*$").unwrap(),
+        Regex::new(r"(?i)\s+season\s+(\d+)\s*$").unwrap(),
+    ];
+    for pattern in patterns {
+        if let Some(caps) = pattern.captures(title) {
+            let season = caps.get(1).map(|value| value.as_str().to_string())?;
+            let matched = caps.get(0)?;
+            let cleaned = title[..matched.start()].trim_end().to_string();
+            if !cleaned.is_empty() {
+                return Some((cleaned, season));
+            }
+        }
+    }
+    None
 }
 
 fn get_search_string(parsed: &ParsedQuery) -> String {
@@ -1063,6 +1087,22 @@ mod tests {
         let parsed = parse_query(query).expect("failed to parse");
         assert_eq!(parsed.anime_title, "Toradora!");
         assert_eq!(parsed.anime_year.as_deref(), Some("2008"));
+    }
+
+    #[test]
+    fn test_parse_query_anime_season_oshi_no_ko() {
+        let query = "Oshi no Ko S3";
+        let parsed = parse_query(query).expect("failed to parse");
+        assert_eq!(parsed.anime_title, "Oshi no Ko");
+        assert_eq!(parsed.anime_season.as_deref(), Some("3"));
+    }
+
+    #[test]
+    fn test_parse_query_anime_season_sousou_no_frieren() {
+        let query = "Sousou no Frieren S2";
+        let parsed = parse_query(query).expect("failed to parse");
+        assert_eq!(parsed.anime_title, "Sousou no Frieren");
+        assert_eq!(parsed.anime_season.as_deref(), Some("2"));
     }
 
     #[tokio::test]
