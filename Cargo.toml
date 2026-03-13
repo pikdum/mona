@@ -8,7 +8,7 @@ anitomy = "0.2"
 axum = "0.8"
 dotenvy = "0.15"
 moka = { version = "0.12", features = ["future"] }
-rand = "0.9"
+rand = "0.10"
 regex = "1"
 reqwest = { version = "0.13", features = ["json", "query"] }
 scraper = "0.25"
