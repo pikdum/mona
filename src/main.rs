@@ -293,17 +293,21 @@ async fn torrent_art(
         return Err((StatusCode::BAD_REQUEST, "invalid url".to_string()));
     }
 
-    let image = get_torrent_art(&state.http, &params.url)
+    match get_torrent_art(&state.http, &params.url)
         .await
         .map_err(|_| {
             (
                 StatusCode::BAD_GATEWAY,
                 "torrent request failed".to_string(),
             )
-        })?
-        .ok_or((StatusCode::NOT_FOUND, "art not found".to_string()))?;
-
-    Ok(Redirect::temporary(&image))
+        })? {
+        TorrentArtLookup::Found(image) => Ok(Redirect::temporary(&image)),
+        TorrentArtLookup::MissingImage => Err((StatusCode::NOT_FOUND, "art not found".to_string())),
+        TorrentArtLookup::UpstreamStatus(status) => Err((
+            StatusCode::BAD_GATEWAY,
+            format!("torrent request failed with status {status}"),
+        )),
+    }
 }
 
 #[utoipa::path(
@@ -972,21 +976,31 @@ async fn get_subsplease_poster(
     Ok(None)
 }
 
+enum TorrentArtLookup {
+    Found(String),
+    MissingImage,
+    UpstreamStatus(StatusCode),
+}
+
 async fn get_torrent_art(
     client: &reqwest::Client,
     url: &str,
-) -> Result<Option<String>, reqwest::Error> {
+) -> Result<TorrentArtLookup, reqwest::Error> {
     let response = client
         .get(url)
         .timeout(Duration::from_secs(5))
         .send()
         .await?;
-    if !response.status().is_success() {
-        return Ok(None);
+    let status = response.status();
+    if !status.is_success() {
+        return Ok(TorrentArtLookup::UpstreamStatus(status));
     }
 
     let body = response.text().await?;
-    Ok(get_torrent_art_from_html(&body))
+    Ok(match get_torrent_art_from_html(&body) {
+        Some(image) => TorrentArtLookup::Found(image),
+        None => TorrentArtLookup::MissingImage,
+    })
 }
 
 fn get_torrent_art_from_html(body: &str) -> Option<String> {
