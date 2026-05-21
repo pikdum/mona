@@ -19,7 +19,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use tokio::sync::RwLock;
 use tracing_subscriber::EnvFilter;
-use url::form_urlencoded;
+use url::{Url, form_urlencoded};
 use utoipa::{OpenApi, ToSchema};
 use utoipa_swagger_ui::SwaggerUi;
 
@@ -47,6 +47,8 @@ static TORRENT_IMAGE_RE: LazyLock<Regex> = LazyLock::new(|| {
 });
 static TORRENT_DESCRIPTION_SELECTOR: LazyLock<Selector> =
     LazyLock::new(|| Selector::parse("div#torrent-description").unwrap());
+static TORRENT_DIMENSION_HINT_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?:^|[-_/])\d{3,4}x\d{3,4}(?:[-_.]|$)").unwrap());
 
 #[derive(Default)]
 struct CacheMetrics {
@@ -1033,18 +1035,30 @@ struct TorrentImageCandidate {
 
 fn normalize_torrent_description_fragment(fragment: &str) -> String {
     fragment
+        .replace("&amp;#10;", "\n")
         .replace("&#10;", "\n")
         .replace("&#xA;", "\n")
+        .replace("&#xa;", "\n")
         .replace("&amp;", "&")
+        .replace("&gt;", ">")
+        .replace("&lt;", "<")
+        .replace("&#39;", "'")
+        .replace("&quot;", "\"")
 }
 
 fn torrent_image_candidates(fragment: &str) -> Vec<TorrentImageCandidate> {
     TORRENT_IMAGE_RE
         .find_iter(fragment)
         .map(|value| {
-            let url = value.as_str().to_string();
+            let original_url = value.as_str();
+            let embedded = torrent_image_is_embedded(fragment, value.start());
+            let url = if embedded {
+                torrent_proxy_image_url(original_url)
+            } else {
+                original_url.to_string()
+            };
             let context = torrent_image_context(fragment, value.start(), value.end());
-            let score = torrent_image_score(&url, &context);
+            let score = torrent_image_score(original_url, &context, embedded);
             TorrentImageCandidate {
                 url,
                 position: value.start(),
@@ -1080,7 +1094,84 @@ fn next_char_boundary(text: &str, mut index: usize) -> usize {
     index
 }
 
-fn torrent_image_score(url: &str, context: &str) -> i32 {
+fn torrent_image_is_embedded(fragment: &str, start: usize) -> bool {
+    let prefix_start = previous_char_boundary(fragment, start.saturating_sub(256));
+    let prefix = &fragment[prefix_start..start];
+    let current_line = prefix.rsplit('\n').next().unwrap_or(prefix);
+    current_line.contains("<img")
+        || current_line.contains("src=\"")
+        || current_line.contains("src='")
+        || current_line.contains("![")
+}
+
+fn torrent_proxy_image_url(url: &str) -> String {
+    let Ok(parsed) = Url::parse(url) else {
+        return url.to_string();
+    };
+
+    let host = parsed.host_str().unwrap_or("");
+    let base_domain = host.split('.').rev().take(2).collect::<Vec<_>>();
+    let base_domain = base_domain.into_iter().rev().collect::<Vec<_>>().join(".");
+    let url_whitelist = [
+        "catbox.moe",
+        "discord.com",
+        "discordapp.com",
+        "discordapp.net",
+        "google.com",
+        "googleusercontent.com",
+        "gstatic.com",
+        "imgur.com",
+        "naver.net",
+        "nocookie.net",
+        "redd.it",
+        "twimg.com",
+        "wordpress.com",
+        "weserv.nl",
+        "wp.com",
+        "wsrv.nl",
+    ];
+
+    if url_whitelist.contains(&base_domain.as_str()) || parsed.scheme() == "data" {
+        return url.to_string();
+    }
+
+    if !parsed.username().is_empty()
+        || parsed.password().is_some()
+        || parsed.port().is_some()
+        || parsed
+            .query()
+            .is_some_and(|query| !query.chars().all(|ch| ch.is_ascii_digit()))
+    {
+        return format!(
+            "https://wsrv.nl/?url={}&n=-1",
+            urlencoding_percent_encode(url)
+        );
+    }
+
+    let shard = torrent_photon_shard(url);
+    let mut proxied = format!("https://i{shard}.wp.com/{}{}", host, parsed.path());
+    if parsed.scheme() == "https" {
+        proxied.push_str("?ssl=1");
+    }
+    proxied
+}
+
+fn torrent_photon_shard(url: &str) -> i32 {
+    let mut hash = 0_i32;
+    for code in url.encode_utf16() {
+        hash = hash
+            .wrapping_shl(5)
+            .wrapping_sub(hash)
+            .wrapping_add(code as i32);
+    }
+    hash.wrapping_abs() % 3
+}
+
+fn urlencoding_percent_encode(url: &str) -> String {
+    form_urlencoded::byte_serialize(url.as_bytes()).collect()
+}
+
+fn torrent_image_score(url: &str, context: &str, embedded: bool) -> i32 {
     let lower = url.to_lowercase();
     let mut score = if lower.contains(".jpg") || lower.contains(".jpeg") {
         30
@@ -1094,13 +1185,16 @@ fn torrent_image_score(url: &str, context: &str) -> i32 {
         || context.contains("screenshot")
         || context.contains("sample")
         || context.contains("screens")
+        || lower.contains("screenshot")
+        || lower.contains("mpv-shot")
+        || TORRENT_DIMENSION_HINT_RE.is_match(&lower)
     {
         score += 1_000;
     }
     if context.contains("cover") || context.contains("poster") || context.contains("key visual") {
         score += 200;
     }
-    if context.contains("![") || context.contains("<img") {
+    if embedded {
         score += 40;
     }
     if context.contains("audio")
@@ -1112,6 +1206,14 @@ fn torrent_image_score(url: &str, context: &str) -> i32 {
         || context.contains("others:")
     {
         score -= 300;
+    }
+    if context.contains("support")
+        || context.contains("donat")
+        || context.contains("crypto")
+        || lower.contains("bitcoin")
+        || lower.contains("crypto")
+    {
+        score -= 1_000;
     }
 
     score
@@ -1207,6 +1309,58 @@ mod tests {
     }
 
     #[test]
+    fn test_torrent_art_prefers_screenshot_thumbnail_over_ad_link() {
+        let html = r#"
+            <div id="torrent-description">
+                Title: 中出し透明人間
+                **Screenshots:**
+                [![[250614][くすりゆび] 中出し透明人間 [RJ01406856] screenshot 1](https://orangepix.is/images/2026/05/19/250614--RJ01406856-screenshot-1.th.png)](https://orangepix.is/image/OD2d)
+                [![[250614][くすりゆび] 中出し透明人間 [RJ01406856] screenshot 2](https://orangepix.is/images/2026/05/19/250614--RJ01406856-screenshot-2.th.png)](https://orangepix.is/image/OESh)
+            </div>
+        "#;
+
+        assert_eq!(
+            get_torrent_art_from_html(html),
+            Some("https://i2.wp.com/orangepix.is/images/2026/05/19/250614--RJ01406856-screenshot-1.th.png?ssl=1".to_string())
+        );
+    }
+
+    #[test]
+    fn test_torrent_art_ignores_donation_image_for_release_art() {
+        let html = r#"
+            <div id="torrent-description">
+                |**Support us**| [&gt; Click &lt;](https://amateursubs.com/support-us/)|
+                [![amateursubs.com](https://amateursubs.com/wp-content/uploads/2025/10/cut_bitcoin1-300x103.png)](https://amateursubs.com/crypto-is-now/)
+                Contact: **AmateurSubtitles@proton.me** or discord primastella1
+                [![amateursubs.com](https://amateursubs.com/wp-content/uploads/2025/10/mpv-shot0790-768x432.jpg)](https://amateursubs.com/sister-breeder-01-02-english-subtitles/)
+            </div>
+        "#;
+
+        assert_eq!(
+            get_torrent_art_from_html(html),
+            Some("https://i1.wp.com/amateursubs.com/wp-content/uploads/2025/10/mpv-shot0790-768x432.jpg?ssl=1".to_string())
+        );
+    }
+
+    #[test]
+    fn test_torrent_art_keeps_imgur_embedded_images_unproxied() {
+        let html = r#"
+            <div id="torrent-description">
+                **Translation:** Tennouji
+                **Encode:** WEB-DL
+                **Subtitles:** English Styled Softsubs
+
+                ![Imgur](https://i.imgur.com/vSdh5Ir.jpg)
+            </div>
+        "#;
+
+        assert_eq!(
+            get_torrent_art_from_html(html),
+            Some("https://i.imgur.com/vSdh5Ir.jpg".to_string())
+        );
+    }
+
+    #[test]
     fn test_torrent_art_prefers_first_preview_over_trailing_banner() {
         let html = r#"
             <div id="torrent-description">
@@ -1215,6 +1369,18 @@ mod tests {
                 ---
                 ![](https://files.catbox.moe/vmwnst.jpg)
             </div>
+        "#;
+
+        assert_eq!(
+            get_torrent_art_from_html(html),
+            Some("https://i.kek.sh/YsaWyzjMcMc.png".to_string())
+        );
+    }
+
+    #[test]
+    fn test_torrent_art_prefers_first_preview_over_trailing_banner_with_html_entities() {
+        let html = r#"
+            <div id="torrent-description">- **Audio(s):** ![](https://i.kek.sh/pdarVhxXr1b.png) Japanese&#10;- **Preview(s):** [➊](https://i.kek.sh/YsaWyzjMcMc.png) | [➋](https://i.kek.sh/V5By0Ohql6u.png)&#10;---&#10;![](https://files.catbox.moe/vmwnst.jpg)</div>
         "#;
 
         assert_eq!(
