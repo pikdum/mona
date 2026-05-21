@@ -39,8 +39,12 @@ struct AppState {
     torrent_metrics: Arc<CacheMetrics>,
 }
 
-static TORRENT_IMAGE_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"https?://[^\s"'<>)]*?\.(?:jpg|jpeg|png|gif)\b"#).unwrap());
+static TORRENT_IMAGE_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r#"(?i)https?://[^\s"'<>\[\]()]*(?:\.jpg|\.jpeg|\.png|\.gif)(?:\?[^\s"'<>\[\]()]*)?"#,
+    )
+    .unwrap()
+});
 static TORRENT_DESCRIPTION_SELECTOR: LazyLock<Selector> =
     LazyLock::new(|| Selector::parse("div#torrent-description").unwrap());
 
@@ -1007,23 +1011,110 @@ fn get_torrent_art_from_html(body: &str) -> Option<String> {
     let document = Html::parse_document(body);
     let description = document.select(&TORRENT_DESCRIPTION_SELECTOR).next()?;
 
-    let html = description.inner_html();
-    TORRENT_IMAGE_RE
-        .find_iter(&html)
-        .map(|value| value.as_str())
-        .max_by_key(|url| torrent_image_score(url))
-        .map(str::to_string)
+    let html = normalize_torrent_description_fragment(&description.inner_html());
+    let text = normalize_torrent_description_fragment(&description.text().collect::<String>());
+    torrent_image_candidates(&html)
+        .into_iter()
+        .chain(torrent_image_candidates(&text))
+        .max_by(|a, b| {
+            a.score
+                .cmp(&b.score)
+                .then_with(|| b.position.cmp(&a.position))
+        })
+        .map(|candidate| candidate.url)
 }
 
-fn torrent_image_score(url: &str) -> u8 {
-    let lower = url.to_lowercase();
-    if lower.ends_with(".jpg") || lower.ends_with(".jpeg") {
-        3
-    } else if lower.ends_with(".png") {
-        2
-    } else {
-        1
+#[derive(Debug, Clone)]
+struct TorrentImageCandidate {
+    url: String,
+    position: usize,
+    score: i32,
+}
+
+fn normalize_torrent_description_fragment(fragment: &str) -> String {
+    fragment
+        .replace("&#10;", "\n")
+        .replace("&#xA;", "\n")
+        .replace("&amp;", "&")
+}
+
+fn torrent_image_candidates(fragment: &str) -> Vec<TorrentImageCandidate> {
+    TORRENT_IMAGE_RE
+        .find_iter(fragment)
+        .map(|value| {
+            let url = value.as_str().to_string();
+            let context = torrent_image_context(fragment, value.start(), value.end());
+            let score = torrent_image_score(&url, &context);
+            TorrentImageCandidate {
+                url,
+                position: value.start(),
+                score,
+            }
+        })
+        .collect()
+}
+
+fn torrent_image_context(fragment: &str, start: usize, end: usize) -> String {
+    let line_start = fragment[..start]
+        .rfind('\n')
+        .map(|value| value + 1)
+        .unwrap_or_else(|| previous_char_boundary(fragment, start.saturating_sub(160)));
+    let line_end = fragment[end..]
+        .find('\n')
+        .map(|value| end + value)
+        .unwrap_or_else(|| next_char_boundary(fragment, (end + 160).min(fragment.len())));
+    fragment[line_start..line_end].to_lowercase()
+}
+
+fn previous_char_boundary(text: &str, mut index: usize) -> usize {
+    while index > 0 && !text.is_char_boundary(index) {
+        index -= 1;
     }
+    index
+}
+
+fn next_char_boundary(text: &str, mut index: usize) -> usize {
+    while index < text.len() && !text.is_char_boundary(index) {
+        index += 1;
+    }
+    index
+}
+
+fn torrent_image_score(url: &str, context: &str) -> i32 {
+    let lower = url.to_lowercase();
+    let mut score = if lower.contains(".jpg") || lower.contains(".jpeg") {
+        30
+    } else if lower.contains(".png") {
+        20
+    } else {
+        10
+    };
+
+    if context.contains("preview")
+        || context.contains("screenshot")
+        || context.contains("sample")
+        || context.contains("screens")
+    {
+        score += 1_000;
+    }
+    if context.contains("cover") || context.contains("poster") || context.contains("key visual") {
+        score += 200;
+    }
+    if context.contains("![") || context.contains("<img") {
+        score += 40;
+    }
+    if context.contains("audio")
+        || context.contains("subtitle")
+        || context.contains("mediainfo")
+        || context.contains("crc32")
+        || context.contains("discord")
+        || context.contains("contact")
+        || context.contains("others:")
+    {
+        score -= 300;
+    }
+
+    score
 }
 
 fn slugify(text: &str) -> String {
@@ -1112,6 +1203,55 @@ mod tests {
         assert_eq!(
             get_torrent_art_from_html(html),
             Some("https://files.catbox.moe/vmwnst.jpg".to_string())
+        );
+    }
+
+    #[test]
+    fn test_torrent_art_prefers_first_preview_over_trailing_banner() {
+        let html = r#"
+            <div id="torrent-description">
+                - **Audio(s):** ![](https://i.kek.sh/pdarVhxXr1b.png) Japanese / DDP 2.0
+                - **Preview(s):** [➊](https://i.kek.sh/YsaWyzjMcMc.png) | [➋](https://i.kek.sh/V5By0Ohql6u.png) | [➌](https://i.kek.sh/ExbctuIhg2P.png)
+                ---
+                ![](https://files.catbox.moe/vmwnst.jpg)
+            </div>
+        "#;
+
+        assert_eq!(
+            get_torrent_art_from_html(html),
+            Some("https://i.kek.sh/YsaWyzjMcMc.png".to_string())
+        );
+    }
+
+    #[test]
+    fn test_torrent_art_prefers_preview_link_in_rendered_html() {
+        let html = r#"
+            <div id="torrent-description">
+                <ul>
+                    <li><strong>Audio(s):</strong> <img src="https://i0.wp.com/i.kek.sh/pdarVhxXr1b.png?ssl=1" alt=""> Japanese</li>
+                    <li><strong>Preview(s):</strong> <a href="https://i.kek.sh/YsaWyzjMcMc.png">➊</a> | <a href="https://i.kek.sh/V5By0Ohql6u.png">➋</a></li>
+                </ul>
+                <p><img src="https://i2.wp.com/files.catbox.moe/vmwnst.jpg?ssl=1" alt=""></p>
+            </div>
+        "#;
+
+        assert_eq!(
+            get_torrent_art_from_html(html),
+            Some("https://i.kek.sh/YsaWyzjMcMc.png".to_string())
+        );
+    }
+
+    #[test]
+    fn test_torrent_art_markdown_image_alt_url_does_not_swallow_target() {
+        let html = r#"
+            <div id="torrent-description">
+                ![https://www.youtube.com/watch?v=UwAzXBCCQrQ](https://i.imgur.com/CREzRJ6.png)
+            </div>
+        "#;
+
+        assert_eq!(
+            get_torrent_art_from_html(html),
+            Some("https://i.imgur.com/CREzRJ6.png".to_string())
         );
     }
 
@@ -1293,6 +1433,6 @@ mod tests {
             .unwrap_or("");
 
         assert_eq!(response.status(), StatusCode::TEMPORARY_REDIRECT);
-        assert!(location.starts_with("http"));
+        assert_eq!(location, "https://i.imgur.com/CREzRJ6.png");
     }
 }
