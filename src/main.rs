@@ -1,6 +1,6 @@
 use std::env;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
 use anitomy::{Anitomy, ElementCategory};
@@ -33,10 +33,16 @@ struct AppState {
     poster_cache: Cache<String, String>,
     fanart_cache: Cache<String, String>,
     torrent_cache: Cache<String, String>,
+    torrent_missing_cache: Cache<String, ()>,
     poster_metrics: Arc<CacheMetrics>,
     fanart_metrics: Arc<CacheMetrics>,
     torrent_metrics: Arc<CacheMetrics>,
 }
+
+static TORRENT_IMAGE_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"https?://[^\s"'<>)]*?\.(?:jpg|jpeg|png|gif)\b"#).unwrap());
+static TORRENT_DESCRIPTION_SELECTOR: LazyLock<Selector> =
+    LazyLock::new(|| Selector::parse("div#torrent-description").unwrap());
 
 #[derive(Default)]
 struct CacheMetrics {
@@ -114,6 +120,7 @@ async fn main() {
             .time_to_live(ttl)
             .build(),
         torrent_cache: Cache::builder().max_capacity(5000).build(),
+        torrent_missing_cache: Cache::builder().max_capacity(5000).build(),
         poster_metrics: Arc::new(CacheMetrics::default()),
         fanart_metrics: Arc::new(CacheMetrics::default()),
         torrent_metrics: Arc::new(CacheMetrics::default()),
@@ -349,6 +356,7 @@ fn spawn_cache_stats_logger(state: &AppState) {
     let poster_cache = state.poster_cache.clone();
     let fanart_cache = state.fanart_cache.clone();
     let torrent_cache = state.torrent_cache.clone();
+    let torrent_missing_cache = state.torrent_missing_cache.clone();
     let poster_metrics = state.poster_metrics.clone();
     let fanart_metrics = state.fanart_metrics.clone();
     let torrent_metrics = state.torrent_metrics.clone();
@@ -359,6 +367,12 @@ fn spawn_cache_stats_logger(state: &AppState) {
             log_cache_stats("poster", &poster_cache, &poster_metrics).await;
             log_cache_stats("fanart", &fanart_cache, &fanart_metrics).await;
             log_cache_stats("torrent", &torrent_cache, &torrent_metrics).await;
+            torrent_missing_cache.run_pending_tasks().await;
+            tracing::info!(
+                cache = "torrent_missing",
+                entries = torrent_missing_cache.entry_count(),
+                "cache stats"
+            );
         }
     });
 }
@@ -421,14 +435,50 @@ async fn cache_torrent_middleware(
     req: axum::http::Request<axum::body::Body>,
     next: Next,
 ) -> Response {
-    cache_redirect_by_query(
-        state.torrent_cache.clone(),
-        state.torrent_metrics.clone(),
-        "url",
-        req,
-        next,
-    )
-    .await
+    let cache_key = extract_query_param(req.uri(), "url");
+    if let Some(key) = cache_key.as_ref() {
+        if let Some(url) = state.torrent_cache.get(key).await {
+            state.torrent_metrics.hits.fetch_add(1, Ordering::Relaxed);
+            return Redirect::temporary(&url).into_response();
+        }
+        if state.torrent_missing_cache.get(key).await.is_some() {
+            state.torrent_metrics.hits.fetch_add(1, Ordering::Relaxed);
+            return (StatusCode::NOT_FOUND, "art not found").into_response();
+        }
+        state.torrent_metrics.misses.fetch_add(1, Ordering::Relaxed);
+    }
+
+    let response = next.run(req).await;
+    match response.status() {
+        StatusCode::TEMPORARY_REDIRECT => {
+            if let (Some(key), Some(location)) = (
+                cache_key,
+                response
+                    .headers()
+                    .get(axum::http::header::LOCATION)
+                    .and_then(|value| value.to_str().ok())
+                    .map(|value| value.to_string()),
+            ) {
+                state.torrent_cache.insert(key, location).await;
+                state
+                    .torrent_metrics
+                    .inserts
+                    .fetch_add(1, Ordering::Relaxed);
+            }
+        }
+        StatusCode::NOT_FOUND => {
+            if let Some(key) = cache_key {
+                state.torrent_missing_cache.insert(key, ()).await;
+                state
+                    .torrent_metrics
+                    .inserts
+                    .fetch_add(1, Ordering::Relaxed);
+            }
+        }
+        _ => {}
+    }
+
+    response
 }
 
 async fn cache_redirect_by_query(
@@ -926,21 +976,40 @@ async fn get_torrent_art(
     client: &reqwest::Client,
     url: &str,
 ) -> Result<Option<String>, reqwest::Error> {
-    let response = client.get(url).send().await?;
+    let response = client
+        .get(url)
+        .timeout(Duration::from_secs(5))
+        .send()
+        .await?;
     if !response.status().is_success() {
         return Ok(None);
     }
 
     let body = response.text().await?;
-    let document = Html::parse_document(&body);
-    let selector = Selector::parse("div#torrent-description").unwrap();
-    let Some(description) = document.select(&selector).next() else {
-        return Ok(None);
-    };
+    Ok(get_torrent_art_from_html(&body))
+}
+
+fn get_torrent_art_from_html(body: &str) -> Option<String> {
+    let document = Html::parse_document(body);
+    let description = document.select(&TORRENT_DESCRIPTION_SELECTOR).next()?;
 
     let html = description.inner_html();
-    let re = Regex::new(r#"https?://[^\s"']+?\.(?:jpg|jpeg|png|gif)"#).unwrap();
-    Ok(re.find(&html).map(|value| value.as_str().to_string()))
+    TORRENT_IMAGE_RE
+        .find_iter(&html)
+        .map(|value| value.as_str())
+        .max_by_key(|url| torrent_image_score(url))
+        .map(str::to_string)
+}
+
+fn torrent_image_score(url: &str) -> u8 {
+    let lower = url.to_lowercase();
+    if lower.ends_with(".jpg") || lower.ends_with(".jpeg") {
+        3
+    } else if lower.ends_with(".png") {
+        2
+    } else {
+        1
+    }
 }
 
 fn slugify(text: &str) -> String {
@@ -983,6 +1052,7 @@ mod tests {
                 .time_to_live(ttl)
                 .build(),
             torrent_cache: Cache::builder().max_capacity(5000).build(),
+            torrent_missing_cache: Cache::builder().max_capacity(5000).build(),
             poster_metrics: Arc::new(CacheMetrics::default()),
             fanart_metrics: Arc::new(CacheMetrics::default()),
             torrent_metrics: Arc::new(CacheMetrics::default()),
@@ -1000,6 +1070,35 @@ mod tests {
         let input = "[SubsPlease] My Show (2020) - 01";
         let output = slugify(input);
         assert_eq!(output, "my-show-2020-01");
+    }
+
+    #[test]
+    fn test_torrent_art_finds_markdown_image_without_trailing_quote() {
+        let html = r#"
+            <div id="torrent-description">
+                Preview: [one](https://i.imgur.com/example.png)
+            </div>
+        "#;
+
+        assert_eq!(
+            get_torrent_art_from_html(html),
+            Some("https://i.imgur.com/example.png".to_string())
+        );
+    }
+
+    #[test]
+    fn test_torrent_art_prefers_jpeg_cover_over_png_badge() {
+        let html = r#"
+            <div id="torrent-description">
+                Audio: ![](https://i.kek.sh/pdarVhxXr1b.png)
+                Cover: ![](https://files.catbox.moe/vmwnst.jpg)
+            </div>
+        "#;
+
+        assert_eq!(
+            get_torrent_art_from_html(html),
+            Some("https://files.catbox.moe/vmwnst.jpg".to_string())
+        );
     }
 
     #[test]
