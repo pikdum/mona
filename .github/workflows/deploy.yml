@@ -12,7 +12,7 @@ jobs:
       name: production
       url: https://mona.fly.dev
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: superfly/flyctl-actions/setup-flyctl@master
       - run: flyctl deploy --depot
         env:
