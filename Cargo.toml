@@ -20,3 +20,6 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 url = "2"
 utoipa = { version = "6", features = ["axum_extras"] }
 utoipa-swagger-ui = { version = "10", features = ["axum"] }
+
+[patch.crates-io]
+zip = { path = "vendor/zip" }
