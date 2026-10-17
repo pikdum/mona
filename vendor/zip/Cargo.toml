@@ -1,0 +1,16 @@
+[package]
+name = "zip"
+version = "8.6.0"
+edition = "2021"
+publish = false
+
+[features]
+default = ["deflate"]
+deflate = ["zip9/deflate"]
+
+[dependencies.zip9]
+package = "zip"
+git = "https://github.com/zip-rs/zip2.git"
+tag = "v9.0.4"
+default-features = false
+features = ["deflate"]
